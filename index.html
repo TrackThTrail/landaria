@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Landaria</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0d0d1a;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      font-family: monospace;
+    }
+    canvas {
+      display: block;
+      border: 3px solid #2a1a4a;
+      box-shadow: 0 0 60px rgba(80, 30, 180, 0.35);
+    }
+    #hud {
+      color: #665580;
+      font-size: 12px;
+      margin-top: 10px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <div id="hud">WASD / Setas — Mover</div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width  = 960;
+    canvas.height = 520;
+
+    // ── World bounds ─────────────────────────────────────────────────────────
+    const GROUND_TOP    = Math.floor(canvas.height * 0.30);
+    const GROUND_BOTTOM = Math.floor(canvas.height * 0.88);
+    const GROUND_H      = GROUND_BOTTOM - GROUND_TOP;
+
+    // ── Player ───────────────────────────────────────────────────────────────
+    const player = {
+      x:        canvas.width  / 2,
+      y:        GROUND_TOP + GROUND_H * 0.60,
+      vx:       0,
+      vy:       0,
+      baseW:    28,
+      baseH:    50,
+      maxSpeed: 4.8,
+      accel:    0.52,
+      friction: 0.80,
+      facing:   1,     // 1 = right, -1 = left
+      walkTime: 0,
+    };
+
+    // ── Input ────────────────────────────────────────────────────────────────
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      keys[e.key] = true;
+      // prevent page scroll
+      if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))
+        e.preventDefault();
+    });
+    window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+    // ── Update ───────────────────────────────────────────────────────────────
+    function update(dt) {
+      const left  = keys['ArrowLeft']  || keys['a'] || keys['A'];
+      const right = keys['ArrowRight'] || keys['d'] || keys['D'];
+      const up    = keys['ArrowUp']    || keys['w'] || keys['W'];
+      const down  = keys['ArrowDown']  || keys['s'] || keys['S'];
+
+      if (left)  player.vx -= player.accel;
+      if (right) player.vx += player.accel;
+      if (up)    player.vy -= player.accel * 0.62; // foreshortened vertical
+      if (down)  player.vy += player.accel * 0.62;
+
+      player.vx *= player.friction;
+      player.vy *= player.friction;
+
+      // Clamp to max speed
+      const spd = Math.hypot(player.vx, player.vy);
+      if (spd > player.maxSpeed) {
+        player.vx *= player.maxSpeed / spd;
+        player.vy *= player.maxSpeed / spd;
+      }
+
+      player.x += player.vx;
+      player.y += player.vy;
+
+      // Facing direction
+      if (player.vx >  0.25) player.facing =  1;
+      if (player.vx < -0.25) player.facing = -1;
+
+      // Walk animation
+      if (spd > 0.25) player.walkTime += dt * spd * 0.013;
+      else            player.walkTime  *= 0.88;
+
+      // World boundaries
+      const halfW = player.baseW * 0.5;
+      player.x = Math.max(halfW, Math.min(canvas.width - halfW, player.x));
+      player.y = Math.max(GROUND_TOP + 10, Math.min(GROUND_BOTTOM, player.y));
+    }
+
+    // ── Background ───────────────────────────────────────────────────────────
+    function drawBackground() {
+      // Sky
+      const sky = ctx.createLinearGradient(0, 0, 0, GROUND_TOP);
+      sky.addColorStop(0, '#130828');
+      sky.addColorStop(1, '#2e1260');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, canvas.width, GROUND_TOP);
+
+      // Distant hills silhouette
+      ctx.fillStyle = '#1e0c42';
+      ctx.beginPath();
+      ctx.moveTo(0, GROUND_TOP);
+      for (let x = 0; x <= canvas.width; x += 3) {
+        const h = 28 + Math.sin(x * 0.018) * 18 + Math.sin(x * 0.006 + 1) * 22;
+        ctx.lineTo(x, GROUND_TOP - h);
+      }
+      ctx.lineTo(canvas.width, GROUND_TOP);
+      ctx.closePath();
+      ctx.fill();
+
+      // Ground gradient
+      const grd = ctx.createLinearGradient(0, GROUND_TOP, 0, GROUND_BOTTOM);
+      grd.addColorStop(0,   '#264426');
+      grd.addColorStop(0.5, '#346034');
+      grd.addColorStop(1,   '#1c361c');
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, GROUND_TOP, canvas.width, GROUND_H + 2);
+
+      // Perspective converging lines (vanishing point at horizon centre)
+      const vpx = canvas.width / 2;
+      const vpy = GROUND_TOP;
+      const nLines = 18;
+      for (let i = 0; i <= nLines; i++) {
+        const t  = i / nLines;
+        const bx = t * canvas.width;
+        const alpha = 0.03 + Math.abs(t - 0.5) * 0.10; // stronger on edges
+        ctx.strokeStyle = `rgba(0,0,0,${alpha})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(vpx, vpy);
+        ctx.lineTo(bx, GROUND_BOTTOM);
+        ctx.stroke();
+      }
+
+      // Horizontal depth bands
+      for (let i = 0; i <= 14; i++) {
+        const t = i / 14;
+        const y = GROUND_TOP + t * GROUND_H;
+        const a = 0.03 + t * 0.07;
+        ctx.strokeStyle = `rgba(0,0,0,${a})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, y); ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // Below-ground ledge strip
+      ctx.fillStyle = '#101e10';
+      ctx.fillRect(0, GROUND_BOTTOM, canvas.width, canvas.height - GROUND_BOTTOM);
+
+      // Ledge highlight line
+      ctx.strokeStyle = 'rgba(80,160,80,0.18)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, GROUND_BOTTOM); ctx.lineTo(canvas.width, GROUND_BOTTOM);
+      ctx.stroke();
+    }
+
+    // ── Player rendering ─────────────────────────────────────────────────────
+    function drawPlayer() {
+      const { x, y, facing, walkTime, vx, vy } = player;
+      const spd = Math.hypot(vx, vy);
+      const moving = spd > 0.25;
+
+      // Depth-based perspective scale: further up = smaller
+      const depthT = (y - GROUND_TOP) / GROUND_H;   // 0 (far) → 1 (near)
+      const scale  = 0.55 + depthT * 0.55;
+      const w = player.baseW * scale;
+      const h = player.baseH * scale;
+
+      // ── Shadow ──────────────────────────────────────────────────────────
+      ctx.save();
+      ctx.globalAlpha = 0.25 + depthT * 0.20;
+      ctx.fillStyle   = '#000';
+      ctx.beginPath();
+      ctx.ellipse(x, y, w * 0.58, w * 0.18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // All character drawing relative to foot position (x, y)
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(facing, 1);
+
+      const leg   = { w: w * 0.28, h: h * 0.33 };
+      const body  = { w: w * 0.72, h: h * 0.42 };
+      const headR = w * 0.37;
+
+      const bodyTop = -(h * 0.02) - leg.h - body.h;
+      const swing   = moving ? Math.sin(walkTime) * 0.34 : 0;
+
+      // ── Legs ─────────────────────────────────────────────────────────────
+      const legColor  = '#5030a0';
+      const bootColor = '#3a2070';
+
+      [[-w * 0.16, swing], [w * 0.16, -swing]].forEach(([lx, angle]) => {
+        ctx.save();
+        ctx.translate(lx, -(leg.h + h * 0.02));
+        ctx.rotate(angle);
+        ctx.fillStyle = legColor;
+        ctx.beginPath();
+        ctx.roundRect(-leg.w / 2, 0, leg.w, leg.h, leg.w * 0.35);
+        ctx.fill();
+        // Boot
+        ctx.fillStyle = bootColor;
+        ctx.beginPath();
+        ctx.roundRect(-leg.w * 0.4, leg.h - leg.h * 0.28, leg.w * 1.3, leg.h * 0.28, leg.w * 0.2);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // ── Body ─────────────────────────────────────────────────────────────
+      const bodyY = bodyTop;
+      ctx.fillStyle = '#c87818';
+      ctx.beginPath();
+      ctx.roundRect(-body.w / 2, bodyY, body.w, body.h, body.w * 0.16);
+      ctx.fill();
+
+      // Chest detail
+      ctx.fillStyle = '#a86010';
+      ctx.beginPath();
+      ctx.roundRect(-body.w * 0.28, bodyY + body.h * 0.15, body.w * 0.56, body.h * 0.42, body.w * 0.10);
+      ctx.fill();
+
+      // Belt
+      ctx.fillStyle = '#7a3c08';
+      ctx.fillRect(-body.w / 2, bodyY + body.h * 0.74, body.w, body.h * 0.14);
+      // Belt buckle
+      ctx.fillStyle = '#e0c040';
+      ctx.fillRect(-body.w * 0.08, bodyY + body.h * 0.72, body.w * 0.16, body.h * 0.18);
+
+      // ── Arms ─────────────────────────────────────────────────────────────
+      const armSwing = moving ? Math.sin(walkTime + Math.PI) * 0.38 : 0;
+      const arm = { w: w * 0.22, h: h * 0.30 };
+      const armY = bodyY + body.h * 0.08;
+
+      [[-body.w / 2 - arm.w * 0.25, armSwing], [body.w / 2 + arm.w * 0.25, -armSwing]].forEach(([ax, angle]) => {
+        ctx.save();
+        ctx.translate(ax, armY);
+        ctx.rotate(angle);
+        ctx.fillStyle = '#c87818';
+        ctx.beginPath();
+        ctx.roundRect(-arm.w / 2, 0, arm.w, arm.h, arm.w * 0.4);
+        ctx.fill();
+        // Glove
+        ctx.fillStyle = '#7a3c08';
+        ctx.beginPath();
+        ctx.roundRect(-arm.w * 0.55, arm.h - arm.h * 0.28, arm.w * 1.1, arm.h * 0.30, arm.w * 0.3);
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // ── Head ─────────────────────────────────────────────────────────────
+      const headY = bodyY - headR * 0.75;
+      ctx.fillStyle = '#f0c468';
+      ctx.beginPath();
+      ctx.arc(0, headY, headR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Helmet
+      ctx.fillStyle = '#904e10';
+      ctx.beginPath();
+      ctx.ellipse(0, headY - headR * 0.18, headR * 1.08, headR * 0.68, 0, Math.PI, 0);
+      ctx.fill();
+      // Helmet rim
+      ctx.fillStyle = '#7a3e0c';
+      ctx.beginPath();
+      ctx.roundRect(-headR * 1.12, headY - headR * 0.22, headR * 2.24, headR * 0.20, headR * 0.07);
+      ctx.fill();
+      // Helmet highlight
+      ctx.fillStyle = 'rgba(255,220,140,0.20)';
+      ctx.beginPath();
+      ctx.ellipse(-headR * 0.25, headY - headR * 0.55, headR * 0.35, headR * 0.20, -0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eyes
+      const eyeY  = headY + headR * 0.08;
+      const eyeX  = headR * 0.32;
+      const eyeRr = headR * 0.16;
+      ctx.fillStyle = '#1a1a2e';
+      ctx.beginPath();
+      ctx.arc(-eyeX, eyeY, eyeRr, 0, Math.PI * 2);
+      ctx.arc( eyeX, eyeY, eyeRr, 0, Math.PI * 2);
+      ctx.fill();
+      // Highlights
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(-eyeX + eyeRr * 0.4, eyeY - eyeRr * 0.4, eyeRr * 0.38, 0, Math.PI * 2);
+      ctx.arc( eyeX + eyeRr * 0.4, eyeY - eyeRr * 0.4, eyeRr * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // ── Game loop ─────────────────────────────────────────────────────────────
+    let lastTime = 0;
+    function loop(timestamp) {
+      const dt = Math.min(timestamp - lastTime, 50); // cap delta to avoid spiral
+      lastTime = timestamp;
+
+      update(dt);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBackground();
+      drawPlayer();
+
+      requestAnimationFrame(loop);
+    }
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
