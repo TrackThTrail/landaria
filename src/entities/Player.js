@@ -22,10 +22,10 @@ export class Player {
     this.walkTime  = 0;
 
     // Física 2D — gravidade assimétrica
-    this.GRAVITY_UP     = 0.008;
-    this.GRAVITY_DOWN   = 0.022;
-    this.JUMP_VY        = -3.2;   // pulo menor
-    this.MAX_FALL_SPEED = 14;
+    this.GRAVITY_UP     = 0.012;  // desacelera na subida → pico suave
+    this.GRAVITY_DOWN   = 0.004;  // acelera devagar na descida → queda lenta/flutuante
+    this.JUMP_VY        = -3.8;   // velocidade inicial do pulo
+    this.MAX_FALL_SPEED = 6;      // cap de queda suave
     this.isOnGround     = true;
 
     // Paraquedas
@@ -51,9 +51,25 @@ export class Player {
     this.gold    = 50;
     this.fuel    = 100;
     this.maxFuel = 100;
+    this.copper  = 0;
+    this.rkanium = 0;   // Rkanium no inventário
+    this.stones  = 0;   // Pedras de Iluminação no inventário
+
+    // Jetpack
+    this.jetpackOn       = false;
+    this.JETPACK_THRUST  = -0.013;   // aceleração por ms (para cima)
+    this.JETPACK_VY_CAP  = -3.0;     // velocidade máxima ascendente
+    this.JETPACK_DRAIN   = 0.010;    // combustível gasto por ms (~10s de voo)
+
+    // Luminosidade subterrânea
+    this.lightRadius  = 90;   // raio de visão em px (cresce ao minerar)
+    this.MAX_LIGHT_R  = 190;  // raio máximo atingível
 
     // Efeitos ativos
     this.effects = [];
+
+    // Animação de levantamento inicial (1 = deitado, 0 = de pé)
+    this.wakeAnim = 1.0;
 
     // Escavação
     this.isDrilling  = false;
@@ -120,6 +136,15 @@ export class Player {
     const grav = this.vy < 0 ? this.GRAVITY_UP : this.GRAVITY_DOWN;
     this.vy += grav * delta;
     if (this.vy > this.MAX_FALL_SPEED) this.vy = this.MAX_FALL_SPEED;
+
+    // ── Jetpack ───────────────────────────────────────────────────────────
+    this.jetpackOn = false;
+    if (input.jetpackActive && !this.isOnGround && this.fuel > 0) {
+      this.jetpackOn = true;
+      this.vy += this.JETPACK_THRUST * delta;
+      if (this.vy < this.JETPACK_VY_CAP) this.vy = this.JETPACK_VY_CAP;
+      this.fuel = Math.max(0, this.fuel - this.JETPACK_DRAIN * delta);
+    }
 
     // ── Paraquedas ────────────────────────────────────────────────────────
     if (input.parachuteToggle && !this.isOnGround && this.hasParachute) {
@@ -189,6 +214,7 @@ export class Player {
     const prevY = this.y;
     this.x += this.vx;
     this.y += this.vy;
+    this._landingVy = this.vy;  // guardado antes de colidir (para dano de queda)
 
     // ── Colisão com plataformas ───────────────────────────────────────────
     this.isOnGround = false;
@@ -212,6 +238,12 @@ export class Player {
 
   draw(g) {
     g.clear();
+
+    // Animação de levantamento: enquanto wakeAnim > 0 desenha pose de levantar
+    if (this.wakeAnim > 0.01) {
+      this._drawWaking(g);
+      return;
+    }
 
     const { x, y, facing, walkTime, vx, idleTime } = this;
     const moving    = Math.abs(vx) > 0.25;
@@ -248,6 +280,19 @@ export class Player {
 
     // ── Paraquedas (atrás do personagem) ──────────────────────────────────
     if (this.parachuteAnim > 0) this._drawParachute(g, x, headY, this.parachuteAnim);
+
+    // ── Chamas do Jetpack ─────────────────────────────────────────────────
+    if (this.jetpackOn) {
+      const packX   = x - facing * (body.w / 2 + w * 0.06);
+      const nozzleY = legBaseY - body.h * 0.12;
+      const fl      = 1.0 + (Math.random() * 0.5 - 0.25);
+      g.fillStyle(0xaaccff, 0.25);
+      g.fillEllipse(packX, nozzleY + 12 * fl, w * 0.32 * fl, 20 * fl);
+      g.fillStyle(0xff6600, 0.85);
+      g.fillEllipse(packX, nozzleY + 8 * fl, w * 0.22 * fl, 14 * fl);
+      g.fillStyle(0xffee44, 1.0);
+      g.fillEllipse(packX, nozzleY + 3, w * 0.12, 7);
+    }
 
     // ── Escavadeira na mão (sempre que hasDrill) ──────────────────────
     if (this.hasDrill) this._drawDrillHand(g, x, y, facing, armY, arm);
@@ -343,6 +388,98 @@ export class Player {
     g.fillRect(x + facing * headR * 0.55, headY - headR * 0.90, 2, headR * 0.55);
     g.fillStyle(0xff4444, 1);
     g.fillCircle(x + facing * headR * 0.56, headY - headR * 0.94, 2);
+  }
+
+  /** Desenha o personagem deitado → levantando. wakeAnim: 1=deitado, 0=de pé. */
+  _drawWaking(g) {
+    const { x, y } = this;
+    const angle = this.wakeAnim * Math.PI * 0.5;  // PI/2 = deitado, 0 = de pé
+    const ca = Math.cos(angle), sa = Math.sin(angle);
+
+    // Roda um ponto (px, py) em torno dos pés (x, y)
+    const r = (px, py) => ({
+      x: x + (px - x) * ca - (py - y) * sa,
+      y: y + (px - x) * sa + (py - y) * ca,
+    });
+
+    const bw    = this.baseW * 0.72;   // mesma largura do tronco frontal normal
+    const bh    = this.baseH;
+    const headR = this.baseW * 0.37;   // mesmo raio do capacete normal
+    const legW  = this.baseW * 0.28;   // mesma largura das pernas normais
+
+    // Sombra no chão
+    g.fillStyle(0x000000, 0.16);
+    g.fillEllipse(x, y, this.baseW * 1.4, this.baseW * 0.28);
+
+    // Perna esquerda
+    const ll = [
+      r(x - legW * 0.9, y - bh * 0.46),
+      r(x - legW * 0.3, y - bh * 0.46),
+      r(x - legW * 0.3, y),
+      r(x - legW * 0.9, y),
+    ];
+    g.fillStyle(0xdde0e8, 1);
+    g.fillPoints(ll, true);
+    // bota
+    const lb = [
+      r(x - legW * 1.05, y - bh * 0.04),
+      r(x - legW * 0.25, y - bh * 0.04),
+      r(x - legW * 0.25, y),
+      r(x - legW * 1.05, y),
+    ];
+    g.fillStyle(0x888a90, 1);
+    g.fillPoints(lb, true);
+
+    // Perna direita
+    const rl = [
+      r(x + legW * 0.3, y - bh * 0.46),
+      r(x + legW * 0.9, y - bh * 0.46),
+      r(x + legW * 0.9, y),
+      r(x + legW * 0.3, y),
+    ];
+    g.fillStyle(0xbbbec8, 1);
+    g.fillPoints(rl, true);
+    const rb = [
+      r(x + legW * 0.25, y - bh * 0.04),
+      r(x + legW * 1.05, y - bh * 0.04),
+      r(x + legW * 1.05, y),
+      r(x + legW * 0.25, y),
+    ];
+    g.fillStyle(0x707278, 1);
+    g.fillPoints(rb, true);
+
+    // Corpo
+    const bc = [
+      r(x - bw / 2, y - bh),
+      r(x + bw / 2, y - bh),
+      r(x + bw / 2, y - bh * 0.40),
+      r(x - bw / 2, y - bh * 0.40),
+    ];
+    g.fillStyle(0xe8eaf0, 1);
+    g.fillPoints(bc, true);
+    // Emblema azul no peito
+    const em = [
+      r(x - bw * 0.12, y - bh * 0.68),
+      r(x + bw * 0.30, y - bh * 0.68),
+      r(x + bw * 0.30, y - bh * 0.56),
+      r(x - bw * 0.12, y - bh * 0.56),
+    ];
+    g.fillStyle(0x2244aa, 0.90);
+    g.fillPoints(em, true);
+
+    // Cabeça (capacete — círculo rotacionado em torno dos pés)
+    const hc = r(x, y - bh - headR);
+    g.fillStyle(0xe8eaf0, 1);
+    g.fillCircle(hc.x, hc.y, headR);
+    g.lineStyle(2, 0x999aaa, 1);
+    g.strokeCircle(hc.x, hc.y, headR);
+    // Visor âmbar
+    const vc = r(x + headR * 0.1, y - bh - headR + headR * 0.08);
+    g.fillStyle(0xc88820, 0.88);
+    g.fillEllipse(vc.x, vc.y, headR * 1.30, headR * 0.70);
+    g.fillStyle(0xfffbe0, 0.28);
+    const vr = r(x - headR * 0.12, y - bh - headR - headR * 0.08);
+    g.fillCircle(vr.x, vr.y, headR * 0.32);
   }
 
   _drawParachute(g, x, headY, openPct) {
@@ -551,8 +688,10 @@ export class Player {
 
     g.fillStyle(0x0a0a1a, 0.75);
     g.fillRoundedRect(barX - 1, manaY - 1, barW + 2, barH + 2, 2);
-    g.fillStyle(0xddcc00, 1);
-    g.fillRoundedRect(barX, manaY, barW * (this.mana / this.maxMana), barH, 2);
+    const fuelPct = this.fuel / this.maxFuel;
+    const fuelColor = fuelPct > 0.5 ? 0xddcc00 : fuelPct > 0.25 ? 0xff8800 : 0xff2200;
+    g.fillStyle(fuelColor, 1);
+    g.fillRoundedRect(barX, manaY, barW * fuelPct, barH, 2);
 
     // Ícone de paraquedas — visível apenas enquanto disponível
     if (this.hasParachute) {

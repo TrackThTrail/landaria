@@ -52,7 +52,7 @@ export class MenuScene extends Phaser.Scene {
     // ── Botão Jogar ───────────────────────────────────────────────────────
     const btnW = 200, btnH = 52;
     const btnX = W / 2 - btnW / 2;
-    const btnY = H * 0.62;
+    const btnY = H * 0.60;
 
     this._btnGfx = this.add.graphics().setDepth(10);
     this._drawBtn(false);
@@ -70,13 +70,30 @@ export class MenuScene extends Phaser.Scene {
       });
     });
 
+    // ── Botão Como Jogar ──────────────────────────────────────────────────
+    const btn2Y = btnY + btnH + 16;
+    this._btn2Gfx = this.add.graphics().setDepth(10);
+    this._drawBtn2(false);
+    this._btn2Zone = this.add.zone(W / 2, btn2Y + btnH / 2, btnW, btnH)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(11);
+    this._btn2Zone.on('pointerover',  () => { this._btn2Hover = true;  this._drawBtn2(true);  });
+    this._btn2Zone.on('pointerout',   () => { this._btn2Hover = false; this._drawBtn2(false); });
+    this._btn2Zone.on('pointerdown',  () => this._openRules());
+
+    // ── Modal de regras (inicialmente oculto) ─────────────────────────────
+    this._buildRulesModal();
+
     // ── Tecla Enter / Espaço também inicia ────────────────────────────────
-    this.input.keyboard.once('keydown-ENTER', () => this._startGame());
-    this.input.keyboard.once('keydown-SPACE', () => this._startGame());
+    this.input.keyboard.on('keydown-ENTER', () => { if (!this._rulesOpen) this._startGame(); });
+    this.input.keyboard.on('keydown-SPACE', () => { if (!this._rulesOpen) this._startGame(); });
+    this.input.keyboard.on('keydown-ESC',   () => { if (this._rulesOpen)  this._closeRules(); });
 
     this.cameras.main.fadeIn(600, 0, 0, 0);
-    this._btnHover = false;
-    this._btnTween = 0;
+    this._btnHover  = false;
+    this._btn2Hover = false;
+    this._btnTween  = 0;
+    this._rulesOpen = false;
   }
 
   _startGame() {
@@ -103,7 +120,7 @@ export class MenuScene extends Phaser.Scene {
     const g    = this._btnGfx;
     const btnW = 200, btnH = 52;
     const bx   = W / 2 - btnW / 2;
-    const by   = H * 0.62;
+    const by   = H * 0.60;
     g.clear();
     // sombra
     g.fillStyle(0x000000, 0.35);
@@ -126,7 +143,74 @@ export class MenuScene extends Phaser.Scene {
       color:      hover ? '#ffffff' : '#ccd8ff',
     }).setOrigin(0.5).setDepth(12);
   }
+  _drawBtn2(hover) {
+    const g    = this._btn2Gfx;
+    const btnW = 200, btnH = 52;
+    const bx   = W / 2 - btnW / 2;
+    const by   = H * 0.60 + btnH + 16;
+    g.clear();
+    g.fillStyle(0x000000, 0.30);
+    g.fillRoundedRect(bx + 4, by + 4, btnW, btnH, 10);
+    g.fillStyle(hover ? 0x336655 : 0x1a4433, 1);
+    g.fillRoundedRect(bx, by, btnW, btnH, 10);
+    g.lineStyle(2, hover ? 0x66cc99 : 0x338866, 1);
+    g.strokeRoundedRect(bx, by, btnW, btnH, 10);
+    g.fillStyle(0xffffff, hover ? 0.14 : 0.07);
+    g.fillRoundedRect(bx + 6, by + 5, btnW - 12, btnH * 0.38, 7);
+    if (this._btn2Text) this._btn2Text.destroy();
+    this._btn2Text = this.add.text(W / 2, by + btnH / 2, '?  COMO JOGAR', {
+      fontFamily: 'monospace',
+      fontSize:   '16px',
+      color:      hover ? '#aaffcc' : '#77ccaa',
+    }).setOrigin(0.5).setDepth(12);
+  }
 
+  _buildRulesModal() {
+    const PW = 560, PH = 340;
+    const PX = (W - PW) / 2, PY = (H - PH) / 2;
+
+    this._rulesGroup = [
+      this._rulesBg = this.add.graphics().setDepth(30),
+      this._rulesText = this.add.text(PX + 24, PY + 20,
+        'CONTROLOS\n' +
+        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +
+        'A / D        Mover para esquerda / direita\n' +
+        'Espa\u00e7o       Pular\n' +
+        'Espa\u00e7o (ar)  Soltar e pressionar de novo: jetpack\n' +
+        '1            Abrir paraquedas\n' +
+        'F            Equipar / guardar a escavadeira\n' +
+        'L            Abrir mesa de ferramentas (perto dela)\n' +
+        'O            Colocar pedra de ilumina\u00e7\u00e3o\n' +
+        'Esc          Fechar menus\n\n' +
+        'OBJETIVO\n' +
+        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +
+        'Cava \u2192 encontra cobre \u2192 compra pedras na mesa\n' +
+        'Usa o jetpack (bateria) para explorar.\n' +
+        'Coloca pedras no ch\u00e3o para iluminar o subsolo.',
+        {
+          fontFamily: 'monospace', fontSize: '13px', color: '#ddeeff',
+          stroke: '#000', strokeThickness: 2, lineSpacing: 4,
+        }).setDepth(31),
+      this._rulesClose = this.add.text(PX + PW - 14, PY + 12, '\u2715', {
+        fontFamily: 'monospace', fontSize: '18px', color: '#ff6666',
+        stroke: '#000', strokeThickness: 2,
+      }).setOrigin(1, 0).setDepth(31)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerover', () => this._rulesClose.setColor('#ffffff'))
+        .on('pointerout',  () => this._rulesClose.setColor('#ff6666'))
+        .on('pointerdown', () => this._closeRules()),
+    ];
+
+    this._rulesBg.fillStyle(0x020d1a, 0.96);
+    this._rulesBg.fillRoundedRect(PX, PY, PW, PH, 12);
+    this._rulesBg.lineStyle(2, 0x336699, 1);
+    this._rulesBg.strokeRoundedRect(PX, PY, PW, PH, 12);
+
+    this._rulesGroup.forEach(o => o.setVisible(false));
+  }
+
+  _openRules()  { this._rulesOpen = true;  this._rulesGroup.forEach(o => o.setVisible(true));  }
+  _closeRules() { this._rulesOpen = false; this._rulesGroup.forEach(o => o.setVisible(false)); }
   _drawShip(g, sx, sy, flame) {
     // fuselagem principal (branca-acinzentada)
     g.fillStyle(0xe0e2ea, 1);

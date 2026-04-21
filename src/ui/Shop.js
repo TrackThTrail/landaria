@@ -13,30 +13,30 @@ export class Shop {
 
     const ts = { fontFamily: 'monospace', stroke: '#000000', strokeThickness: 2 };
 
-    this._g         = scene.add.graphics().setDepth(20);
-    this._title     = scene.add.text(PX + PW / 2, PY + 16, 'Loja do Vendedor',
-                        { ...ts, fontSize: '16px', color: '#ffd700' }).setOrigin(0.5, 0).setDepth(21);
-    this._goldText  = scene.add.text(PX + 14, PY + 44, '',
-                        { ...ts, fontSize: '13px', color: '#ffe088' }).setDepth(21);
+    this._g         = scene.add.graphics().setDepth(20).setScrollFactor(0);
+    this._title     = scene.add.text(PX + PW / 2, PY + 16, 'Mesa de Ferramentas',
+                        { ...ts, fontSize: '16px', color: '#e8a060' }).setOrigin(0.5, 0).setDepth(21).setScrollFactor(0);
+    this._copperText = scene.add.text(PX + 14, PY + 44, '',
+                        { ...ts, fontSize: '13px', color: '#e8a060' }).setDepth(21).setScrollFactor(0);
 
-    // ── Item: Poção de Vida ───────────────────────────────────────────────
-    this._itemName  = scene.add.text(PX + 20, PY + 86, '❤  Poção de Vida',
-                        { ...ts, fontSize: '14px', color: '#ff8888' }).setDepth(21);
-    this._itemDesc  = scene.add.text(PX + 20, PY + 108, '+2 HP/s durante 10s',
-                        { ...ts, fontSize: '11px', color: '#bbbbbb' }).setDepth(21);
-    this._itemPrice = scene.add.text(PX + 20, PY + 126, '💰 10 ouro',
-                        { ...ts, fontSize: '12px', color: '#ffd700' }).setDepth(21);
+    // ── Item: Pedra de Iluminação ───────────────────────────────────────────
+    this._itemName  = scene.add.text(PX + 20, PY + 86, '\u{1F4A1} Pedra de Iluminação',
+                        { ...ts, fontSize: '14px', color: '#ffe066' }).setDepth(21).setScrollFactor(0);
+    this._itemDesc  = scene.add.text(PX + 20, PY + 108, 'Coloca no chão e ilumina a área [O]',
+                        { ...ts, fontSize: '11px', color: '#bbbbbb' }).setDepth(21).setScrollFactor(0);
+    this._itemPrice = scene.add.text(PX + 20, PY + 126, '\u{1F7E0} 1 cobre  \u{1F52E} 1 rkanium',
+                        { ...ts, fontSize: '12px', color: '#e8a060' }).setDepth(21).setScrollFactor(0);
 
     this._buyBtn    = scene.add.text(PX + PW - 20, PY + 106, '[ Comprar ]',
                         { ...ts, fontSize: '13px', color: '#88ff88' })
-                        .setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
+                        .setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21).setScrollFactor(0);
 
     this._feedback  = scene.add.text(PX + PW / 2, PY + PH - 28, '',
-                        { ...ts, fontSize: '12px', color: '#ffcc00' }).setOrigin(0.5).setDepth(21);
+                        { ...ts, fontSize: '12px', color: '#ffcc00' }).setOrigin(0.5).setDepth(21).setScrollFactor(0);
 
     this._closeBtn  = scene.add.text(PX + PW - 10, PY + 10, '✕',
                         { ...ts, fontSize: '16px', color: '#ff6666' })
-                        .setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21);
+                        .setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21).setScrollFactor(0);
 
     // Hover efeitos
     this._buyBtn.on('pointerover', () => this._buyBtn.setColor('#ffffff'));
@@ -60,7 +60,7 @@ export class Shop {
     if (!this.visible) return;
 
     if (this._player) {
-      this._goldText.setText(`💰 Ouro: ${this._player.gold}`);
+      this._copperText.setText(`\u{1F7E0} Cobre: ${this._player.copper}`);
     }
 
     if (this._feedbackTimer > 0) {
@@ -71,29 +71,32 @@ export class Shop {
     // Redesenha o painel a cada frame (dentro do if visible)
     const { x, y, w, h } = this._bounds;
     this._g.clear();
-    this._g.fillStyle(0x080514, 0.94);
+    this._g.fillStyle(0x14090a, 0.94);
     this._g.fillRoundedRect(x, y, w, h, 10);
-    this._g.lineStyle(2, 0x7733cc, 1);
+    this._g.lineStyle(2, 0xc06030, 1);
     this._g.strokeRoundedRect(x, y, w, h, 10);
-    this._g.lineStyle(1, 0x443366, 0.8);
+    this._g.lineStyle(1, 0x664433, 0.8);
     this._g.lineBetween(x + 10, y + 38, x + w - 10, y + 38);
     this._g.lineBetween(x + 10, y + 76, x + w - 10, y + 76);
   }
 
   _onBuy() {
     if (!this._player) return;
-    if (this._player.gold >= 10) {
-      this._player.gold -= 10;
-      this._player.addEffect('health_potion');
-      this._feedback.setText('Poção adicionada!').setColor('#88ff88');
+    if (this._player.copper >= 1 && this._player.rkanium >= 1) {
+      this._player.copper  -= 1;
+      this._player.rkanium -= 1;
+      this._player.stones  += 1;
+      this._feedback.setText('Pedra obtida! [O] para usar').setColor('#ffe066');
+    } else if (this._player.copper < 1) {
+      this._feedback.setText('Cobre insuficiente!').setColor('#ff6666');
     } else {
-      this._feedback.setText('Ouro insuficiente!').setColor('#ff6666');
+      this._feedback.setText('Rkanium insuficiente!').setColor('#ff6666');
     }
     this._feedbackTimer = 2200;
   }
 
   _setVisible(v) {
-    [this._g, this._title, this._goldText, this._itemName, this._itemDesc,
+    [this._g, this._title, this._copperText, this._itemName, this._itemDesc,
      this._itemPrice, this._buyBtn, this._feedback, this._closeBtn]
       .forEach(o => o.setVisible(v));
   }

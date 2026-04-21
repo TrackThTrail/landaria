@@ -120,7 +120,88 @@ export class SoundEngine {
     this._digLoop = null;
   }
 
-  /** "Crak" ao quebrar o bloco. */
+  /** Inicia o som contínuo do jetpack (hiss + rumble). */
+  sfxJetpackStart() {
+    if (!this._ctx || this._jetpackLoop) return;
+    const ctx = this._ctx;
+
+    const bufSize = ctx.sampleRate * 2;
+    const buf     = ctx.createBuffer(1, bufSize, ctx.sampleRate);
+    const data    = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = Math.random() * 2 - 1;
+
+    const src  = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop   = true;
+
+    const flt = ctx.createBiquadFilter();
+    flt.type            = 'bandpass';
+    flt.frequency.value = 700;
+    flt.Q.value         = 0.6;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + 0.12);
+
+    const rumble     = ctx.createOscillator();
+    const rumbleGain = ctx.createGain();
+    rumble.type = 'sawtooth';
+    rumble.frequency.value = 70;
+    rumbleGain.gain.setValueAtTime(0, ctx.currentTime);
+    rumbleGain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.12);
+
+    src.connect(flt); flt.connect(gain); gain.connect(this._masterSfx);
+    rumble.connect(rumbleGain); rumbleGain.connect(this._masterSfx);
+    src.start();
+    rumble.start();
+
+    this._jetpackLoop = { src, rumble, gain, rumbleGain };
+  }
+
+  /** Para o som do jetpack com fade-out. */
+  sfxJetpackStop() {
+    if (!this._ctx || !this._jetpackLoop) return;
+    const { src, rumble, gain, rumbleGain } = this._jetpackLoop;
+    const now = this._ctx.currentTime;
+    gain.gain.setTargetAtTime(0, now, 0.08);
+    rumbleGain.gain.setTargetAtTime(0, now, 0.08);
+    setTimeout(() => { try { src.stop(); rumble.stop(); } catch (_) {} }, 400);
+    this._jetpackLoop = null;
+  }
+
+  /** Thud pesado ao cair de grande altura. */
+  sfxFallDamage() {
+    if (!this._ctx) return;
+    const ctx = this._ctx;
+    const now = ctx.currentTime;
+
+    // Impacto grave — "THUD" corporal
+    const body     = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(120, now);
+    body.frequency.exponentialRampToValueAtTime(28, now + 0.25);
+    bodyGain.gain.setValueAtTime(0.55, now);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    body.connect(bodyGain); bodyGain.connect(this._masterSfx);
+    body.start(now); body.stop(now + 0.30);
+
+    // Ruído de impacto — "crack" de ossos
+    const size = ctx.sampleRate * 0.12;
+    const buf  = ctx.createBuffer(1, size, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < size; i++) data[i] = Math.random() * 2 - 1;
+    const nSrc  = ctx.createBufferSource();
+    nSrc.buffer = buf;
+    const nFlt  = ctx.createBiquadFilter();
+    nFlt.type = 'bandpass'; nFlt.frequency.value = 400; nFlt.Q.value = 0.8;
+    const nGain = ctx.createGain();
+    nGain.gain.setValueAtTime(0.30, now);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    nSrc.connect(nFlt); nFlt.connect(nGain); nGain.connect(this._masterSfx);
+    nSrc.start(now); nSrc.stop(now + 0.14);
+  }
+
   sfxDigImpact() {
     if (!this._ctx) return;
     const ctx = this._ctx;
@@ -151,6 +232,35 @@ export class SoundEngine {
     bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
     body.connect(bodyGain); bodyGain.connect(this._masterSfx);
     body.start(now); body.stop(now + 0.14);
+  }
+
+  /** "Clink" metálico ao quebrar bloco de cobre. */
+  sfxDigImpactCopper() {
+    if (!this._ctx) return;
+    const ctx = this._ctx;
+    const now = ctx.currentTime;
+
+    // ping metálico — sine de alta freq com decay médio
+    const ping     = ctx.createOscillator();
+    const pingGain = ctx.createGain();
+    ping.type = 'triangle';
+    ping.frequency.setValueAtTime(1100, now);
+    ping.frequency.exponentialRampToValueAtTime(600, now + 0.18);
+    pingGain.gain.setValueAtTime(0.28, now);
+    pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.20);
+    ping.connect(pingGain); pingGain.connect(this._masterSfx);
+    ping.start(now); ping.stop(now + 0.22);
+
+    // segundo harmônico mais suave
+    const ping2     = ctx.createOscillator();
+    const ping2Gain = ctx.createGain();
+    ping2.type = 'sine';
+    ping2.frequency.setValueAtTime(660, now + 0.02);
+    ping2.frequency.exponentialRampToValueAtTime(340, now + 0.22);
+    ping2Gain.gain.setValueAtTime(0.15, now + 0.02);
+    ping2Gain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+    ping2.connect(ping2Gain); ping2Gain.connect(this._masterSfx);
+    ping2.start(now + 0.02); ping2.stop(now + 0.26);
   }
 
   sfxShopOpen() {
@@ -224,9 +334,10 @@ export class SoundEngine {
     const breathLFO  = ctx.createOscillator();
     const breathGain = ctx.createGain();
     breathLFO.frequency.value = 0.07;
-    breathGain.gain.value     = 0.10;
+    breathGain.gain.value     = 0.06;
     breathLFO.connect(breathGain);
-    breathGain.connect(out.gain);  // modula o master levemente
+    // Liga ao gain do reverbBus em vez de ao master, para não vazar quando muted
+    breathGain.connect(reverbBus.gain);
     breathLFO.start();
 
     // ── Melodia pentatônica (notas de caixinha de música) ─────────────────

@@ -1,6 +1,5 @@
-import { W, H, WORLD_H, GROUND_Y, CLOUD_X, CLOUD_Y, CLOUD_W, CLOUD_H, VENDOR_X, CELL_SIZE } from '../constants.js';
+import { W, H, WORLD_H, GROUND_Y, CLOUD_X, CLOUD_Y, CLOUD_W, CLOUD_H, WORKBENCH_X, CELL_SIZE } from '../constants.js';
 import { Player } from '../entities/Player.js';
-import { Vendor } from '../entities/Vendor.js';
 import { Shop }   from '../ui/Shop.js';
 import { TerrainGrid } from '../terrain/TerrainGrid.js';
 import { SoundEngine } from '../audio/SoundEngine.js';
@@ -13,8 +12,8 @@ export class GameScene extends Phaser.Scene {
     this._bg          = this.add.graphics().setDepth(0).setScrollFactor(0);
     this._parallaxGfx = this.add.graphics().setDepth(1).setScrollFactor(0.08);
     this._terrainGfx  = this.add.graphics().setDepth(1.5); // blocos escaváveis
-    this._staticGfx  = this.add.graphics().setDepth(2);   // nuvem
-    this._vendorGfx  = this.add.graphics().setDepth(3);
+    this._staticGfx  = this.add.graphics().setDepth(2);   // nuvem + workbench
+    this._workbenchGfx = this.add.graphics().setDepth(3);
     this.gfx         = this.add.graphics().setDepth(4);   // personagem
     this.hudGfx      = this.add.graphics().setDepth(5);   // barras
 
@@ -25,8 +24,24 @@ export class GameScene extends Phaser.Scene {
     ];
 
     // ── Entidades ──────────────────────────────────────────────────────────
-    this.player = new Player(CLOUD_X, CLOUD_Y);
-    this.vendor = new Vendor(VENDOR_X, CLOUD_Y);  // vendedor na nuvem
+    // O personagem começa deitado na superfície, ao lado da cápsula
+    this.player = new Player(WORKBENCH_X + 65, GROUND_Y);
+    this.player.isOnGround = true;
+    // Animação de despertar: 0–2.8s de intro
+    this._wakeupTimer = 0;
+    this._wakeupDur   = 2800;
+    this._wakeupDone  = false;
+    // ── workbench (mesa de ferramentas na superfície, lado esquerdo) ──────
+    this._workbench = { x: WORKBENCH_X, y: GROUND_Y, interactDist: 110,
+                        battery: 1000, maxBattery: 1000 };
+
+    // ── Pedras de Iluminação colocadas no mundo ───────────────────────────
+    this._placedStones  = [];   // [{ x, y }] em coords de mundo
+    this._stoneGfx      = this.add.graphics().setDepth(3);
+    this._cableGfx      = this.add.graphics().setDepth(3.5);
+    this._cableConnected = false;
+    this._CABLE_MAX_DIST = 110;  // px — igual ao interactDist da loja
+    this._CHARGE_RATE    = 100 / (20 * 1000); // 100% em 20s (por ms)
 
     // ── Shop ──────────────────────────────────────────────────────────────
     this.shop = new Shop(this);
@@ -42,10 +57,13 @@ export class GameScene extends Phaser.Scene {
     });
     this._spaceKey  = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this._gKey      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.G);
-    this._vKey      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.V);
+    this._lKey      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.L);
+    this._oKey      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.O);
+    this._key1      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this._escKey    = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this._sKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this._fKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
+    this._hKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.H);
     this._mineTimerH   = 0;  // timer de escavação direcional
     this._drillTarget  = null; // bloco alvo para flash
     this._drillingAudio  = false;
@@ -77,25 +95,64 @@ export class GameScene extends Phaser.Scene {
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
+    // HUD cobre — terceira linha, canto superior esquerdo
+    this._copperHud = this.add.text(12, 56, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#e8a060',
+      stroke: '#000', strokeThickness: 3,
+    }).setDepth(10).setScrollFactor(0);
+
+    // HUD rkanium — quarta linha
+    this._rkaniumHud = this.add.text(12, 78, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#cc66ff',
+      stroke: '#000', strokeThickness: 3,
+    }).setDepth(10).setScrollFactor(0);
+
+    // HUD pedras de iluminação — quinta linha, canto superior esquerdo
+    this._stoneHud = this.add.text(12, 100, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#ffe066',
+      stroke: '#000', strokeThickness: 3,
+    }).setDepth(10).setScrollFactor(0);
+
     // HUD altitude — canto superior direito
     this._altHud = this.add.text(W - 12, 12, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#88ddff',
       stroke: '#000', strokeThickness: 3,
     }).setOrigin(1, 0).setDepth(10).setScrollFactor(0);
 
-    // Prompt de interação com vendedor
-    this._vPrompt = this.add.text(0, 0, '[V] Abrir Loja', {
+    // Prompt de interação com a cápsula de emergência
+    this._vPrompt = this.add.text(0, 0, '🚨 Mesa  [L]', {
       fontFamily: 'monospace', fontSize: '12px', color: '#ffff44',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setVisible(false).setDepth(5);
+
+    // Prompt do cabo carregador
+    this._cablePrompt = this.add.text(0, 0, '🔋 Cabo [H]', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#88ffcc',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setVisible(false).setDepth(5);
 
     // ── Terreno + Estáticos ────────────────────────────────────────────────
     this._terrain = new TerrainGrid(GROUND_Y, WORLD_H, W, CELL_SIZE);
     this._drawBackground();
+    // Pré-gera dados das estrelas para parallax
+    {
+      const rng = new Phaser.Math.RandomDataGenerator(['landaria2d']);
+      this._starData = Array.from({ length: 140 }, () => ({
+        x:    rng.between(0, W),
+        y:    rng.between(0, H - 20),
+        r:    rng.realInRange(0.4, 1.8),
+        twinkle: rng.realInRange(0, Math.PI * 2),  // fase inicial do brilho
+      }));
+    }
     this._drawParallax();
     this._drawCloud();
-    this.vendor.draw(this._vendorGfx);
-    this._drawVendorSign();
+    this._drawWorkbench();
+
+    // ── Sistema de Luminosidade ──────────────────────────────────────────
+    // Canvas 2D: destination-out garante coords de ecrã exatas sem câmera Phaser
+    this._lightCanvas = this.textures.createCanvas('_lightCanvas', W, H);
+    this._lightImage  = this.add.image(0, 0, '_lightCanvas')
+      .setOrigin(0, 0).setDepth(9).setScrollFactor(0);
 
     // ── Áudio ────────────────────────────────────────────────────────────
     this._snd = new SoundEngine();
@@ -104,6 +161,10 @@ export class GameScene extends Phaser.Scene {
     this.input.keyboard.once('keydown', () => this._snd.init());
     this._wasOnGround = true;
     this._wasDrilling = false;
+    this._jetpackArmed = false;   // true só após soltar espaço no ar
+
+    // ── Texto flutuante de drop (+1) ─────────────────────────────────────
+    this._floatTexts = [];  // [{ text: Phaser.Text, vy, life, maxLife }]
 
     // Botão engrenagem + modal de configurações de áudio
     const container = document.getElementById('game-container') || document.body;
@@ -113,17 +174,57 @@ export class GameScene extends Phaser.Scene {
 
   update(_time, delta) {
     const { _cursors: c, _wasd: w, player, shop } = this;
+
+    // ── Animação de despertar ──────────────────────────────────────────────
+    if (!this._wakeupDone) {
+      this._wakeupTimer += delta;
+      const t = Math.min(1, this._wakeupTimer / this._wakeupDur);
+      if (t < 0.20) {
+        player.wakeAnim = 1.0;   // deitado immóvel
+      } else {
+        const p   = (t - 0.20) / 0.80;
+        const ease = p * p * (3 - 2 * p);  // smoothstep
+        player.wakeAnim = Math.max(0, 1 - ease);
+      }
+      if (t >= 1) {
+        this._wakeupDone  = true;
+        player.wakeAnim   = 0;
+        this._snd.sfxLand(); // pequeno impacto ao ficar de pé
+        this._wasOnGround = true;
+      }
+    }
+
     const shopOpen = shop.visible;
 
     const spaceJustDown = !shopOpen && Phaser.Input.Keyboard.JustDown(this._spaceKey);
+    const spaceIsDown   = !shopOpen && this._spaceKey.isDown;
     const wJustDown     = !shopOpen && !player.hasDrill && Phaser.Input.Keyboard.JustDown(w.up);
+    const wIsDown       = !shopOpen && !player.hasDrill && w.up.isDown;
     const jumpJustDown  = (spaceJustDown || wJustDown) && player.isOnGround;
+
+    // Jetpack "armado": só ativa depois de soltar espaço após o pulo
+    if (player.isOnGround) {
+      this._jetpackArmed = false;   // reset ao tocar o chão
+    } else if (!(spaceIsDown || wIsDown)) {
+      this._jetpackArmed = true;    // espaço foi solto no ar — agora pode armar
+    }
+    const jetpackActive = this._jetpackArmed && (spaceIsDown || wIsDown) && !player.isOnGround && player.fuel > 0;
+    const key1JustDown  = !shopOpen && Phaser.Input.Keyboard.JustDown(this._key1);
+
     const input = {
       left:             !shopOpen && (c.left.isDown  || w.left.isDown),
       right:            !shopOpen && (c.right.isDown || w.right.isDown),
       jumpJustDown,
-      parachuteToggle:  (spaceJustDown || wJustDown) && !player.isOnGround,
+      jetpackActive,
+      parachuteToggle:  key1JustDown && !player.isOnGround,
     };
+
+    // Bloqueia controlos durante animação inicial
+    if (!this._wakeupDone) {
+      input.left = false; input.right = false;
+      input.jumpJustDown = false; input.jetpackActive = false;
+      input.parachuteToggle = false;
+    }
 
     // ── SFX pulo / paraquedas ────────────────────────────────────────────
     if (input.jumpJustDown) this._snd.sfxJump();
@@ -131,9 +232,10 @@ export class GameScene extends Phaser.Scene {
 
     player.update(input, delta, this._platforms);
 
-    // SFX aterrisagem
-    if (!this._wasOnGround && player.isOnGround) this._snd.sfxLand();
-    this._wasOnGround = player.isOnGround;
+    // SFX jetpack on/off
+    if (player.jetpackOn && !this._jetpackWasOn) this._snd.sfxJetpackStart();
+    if (!player.jetpackOn && this._jetpackWasOn) this._snd.sfxJetpackStop();
+    this._jetpackWasOn = player.jetpackOn;
 
     // ── Colisão AABB com terreno ─────────────────────────────────────────
     if (player.y >= GROUND_Y - CELL_SIZE) {
@@ -149,7 +251,11 @@ export class GameScene extends Phaser.Scene {
         if (row >= 0) {
           const col = Math.floor(player.x / cs);
           if (this._terrain.isSolid(col, row)) {
+            const wasAir = !player.isOnGround;
             player.y          = GROUND_Y + row * cs;
+            if (wasAir && player.vy > 0) {
+              player._landingVy = player.vy;
+            }
             player.vy         = 0;
             player.isOnGround = true;
             player.parachuteOpen = false;
@@ -201,6 +307,21 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+
+    // SFX aterrisagem + dano de queda (após AABB para terreno ser detectado)
+    const justLanded = !this._wasOnGround && player.isOnGround;
+    if (justLanded) {
+      this._snd.sfxLand();
+      // paraquedas limita vy ≤ 2, por isso naturalmente abaixo do threshold
+      const fallVy = player._landingVy || 0;
+      if (fallVy > 4.5) {
+        const dmg = Math.round((fallVy - 4.5) * 18);
+        player.hp = Math.max(0, player.hp - dmg);
+        this._spawnFloatText(player.x, player.y - player.baseH, `-${dmg} HP`, '#ff4444');
+        this._snd.sfxFallDamage();
+      }
+    }
+    this._wasOnGround = player.isOnGround;
 
     // ── Toggle escavadeira (F) ───────────────────────────────────────────
     if (Phaser.Input.Keyboard.JustDown(this._fKey)) {
@@ -256,11 +377,32 @@ export class GameScene extends Phaser.Scene {
             this._snd.sfxDigStart();
           }
 
-          if (this._mineTimerH >= 350) {
+          // Cobre demora o dobro (700ms), rkanium 1000ms, regolito 350ms
+          const blockType    = this._terrain.cells[tRow][tCol];
+          const mineRequired = blockType === 3 ? 1000 : blockType === 2 ? 700 : 350;
+          if (this._mineTimerH >= mineRequired) {
             this._mineTimerH = 0;
-            if (this._terrain.dig(tCol, tRow)) {
+            const dug = this._terrain.dig(tCol, tRow);
+            if (dug > 0) {
               player.drainFuel(3);
-              this._snd.sfxDigImpact();
+              const bx = tCol * CELL_SIZE + CELL_SIZE / 2;
+              const by = GROUND_Y + tRow * CELL_SIZE;
+              if (dug === 3) {
+                this._snd.sfxDigImpactCopper();
+                player.rkanium++;
+                this._spawnFloatText(bx, by, '+1 Rkanium', '#cc66ff');
+                player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 2);
+              } else if (dug === 2) {
+                this._snd.sfxDigImpactCopper();
+                player.copper++;
+                this._spawnFloatText(bx, by, '+1 Cobre', '#e8a060');
+                // Cobre aumenta mais o raio de visão
+                player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 6);
+              } else {
+                this._snd.sfxDigImpact();
+                // Regolito aumenta levemente o raio de visão
+                player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 0.3);
+              }
             }
           }
         } else {
@@ -286,6 +428,95 @@ export class GameScene extends Phaser.Scene {
     }
 
     player.draw(this.gfx);
+
+    // ── Luminosidade subterrânea (overlay de escuridão com buraco de luz) ─────────
+    {
+      const depthPx        = player.y - GROUND_Y;   // negativo: acima; positivo: abaixo
+      const camY           = this.cameras.main.scrollY;
+      const surfaceScreenY = GROUND_Y - camY;        // Y da superfície em coords de ecrã
+      const ctx = this._lightCanvas.context;
+      ctx.clearRect(0, 0, W, H);
+
+      if (surfaceScreenY < H) {
+        const FADE_DEPTH = CELL_SIZE * 4;  // 4 blocos visíveis a partir da superfície
+        const fadeEnd    = surfaceScreenY + FADE_DEPTH;  // em coords de ecrã (pode sair do ecrã)
+
+        // ── 1. Gradiente: surface → surface+4blocos (sempre presente) ──────
+        const gradTop = Math.max(0, surfaceScreenY);
+        const gradBot = Math.min(H, fadeEnd);
+        if (gradBot > gradTop) {
+          // calcula alpha no topo e fundo do segmento visível
+          const alphaAt = sy => Math.min(0.92, Math.max(0, (sy - surfaceScreenY) / FADE_DEPTH) * 0.92);
+          const grad = ctx.createLinearGradient(0, gradTop, 0, gradBot);
+          grad.addColorStop(0, `rgba(0,0,0,${alphaAt(gradTop).toFixed(3)})`);
+          grad.addColorStop(1, `rgba(0,0,0,${alphaAt(gradBot).toFixed(3)})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, gradTop, W, gradBot - gradTop);
+        }
+
+        // ── 2. Tudo abaixo dos 4 blocos: preto total ───────────────────────
+        if (fadeEnd < H) {
+          ctx.fillStyle = 'rgba(0,0,0,0.92)';
+          ctx.fillRect(0, Math.max(0, fadeEnd), W, H - Math.max(0, fadeEnd));
+        }
+
+        // ── 3. Acima da superfície: escurece gradualmente ao descer ─────────
+        if (depthPx > 0 && surfaceScreenY > 0) {
+          const topAlpha = Math.min(0.92, (depthPx / 200) * 0.92);
+          ctx.fillStyle = `rgba(0,0,0,${topAlpha.toFixed(3)})`;
+          ctx.fillRect(0, 0, W, surfaceScreenY);
+        }
+
+        // ── 4. Underground: buraco de luz à volta do jogador ────────────────
+        if (depthPx > 0) {
+          const sx = player.x;
+          const sy = (player.y - player.baseH * 0.5) - camY;
+          const miningBoost = (player.isDrilling || player.isDrillingH) ? 35 : 0;
+          const R  = player.lightRadius + miningBoost;
+          const edge = Math.min(18, R * 0.12);  // fade só nas últimas 18px da borda
+          ctx.save();
+          ctx.globalCompositeOperation = 'destination-out';
+          // Área plana: totalmente transparente até (R - edge)
+          ctx.fillStyle = 'rgba(0,0,0,1)';
+          ctx.beginPath();
+          ctx.arc(sx, sy, R - edge, 0, Math.PI * 2);
+          ctx.fill();
+          // Borda suave: gradiente apenas na faixa [R-edge, R]
+          const grd = ctx.createRadialGradient(sx, sy, R - edge, sx, sy, R);
+          grd.addColorStop(0, 'rgba(0,0,0,1)');
+          grd.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = grd;
+          ctx.beginPath();
+          ctx.arc(sx, sy, R, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // ── 5. Pedras colocadas: cada uma abre um círculo de luz ─────────────
+        if (this._placedStones.length > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'destination-out';
+          const STONE_R = 100;
+          const STONE_EDGE = 14;
+          for (const st of this._placedStones) {
+            const stSY = (st.y - 4) - camY;
+            ctx.fillStyle = 'rgba(0,0,0,1)';
+            ctx.beginPath();
+            ctx.arc(st.x, stSY, STONE_R - STONE_EDGE, 0, Math.PI * 2);
+            ctx.fill();
+            const grd2 = ctx.createRadialGradient(st.x, stSY, STONE_R - STONE_EDGE, st.x, stSY, STONE_R);
+            grd2.addColorStop(0, 'rgba(0,0,0,1)');
+            grd2.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grd2;
+            ctx.beginPath();
+            ctx.arc(st.x, stSY, STONE_R, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+      }
+      this._lightCanvas.refresh();
+    }
 
     // ── Flash do bloco-alvo ──────────────────────────────────────────────
     if (this._drillTarget) {
@@ -313,10 +544,37 @@ export class GameScene extends Phaser.Scene {
     const targetScrollY = Phaser.Math.Clamp(player.y - H * 0.5, 0, WORLD_H - H);
     this.cameras.main.scrollY = Phaser.Math.Linear(this.cameras.main.scrollY, targetScrollY, 0.14);
 
-    // Ouro + combustível
+    // Ouro + combustível + cobre
     this._goldHud.setText(`💰 ${player.gold}`);
     const fp = Math.ceil(player.fuel);
     this._fuelHud.setText(`⛽ ${fp}%`).setColor(fp > 30 ? '#88ff88' : '#ff6644');
+    this._copperHud.setText(`🟠 ${player.copper} Cu`);
+    this._rkaniumHud.setText(player.rkanium > 0 ? `🔮 ${player.rkanium} Rk` : '');
+    this._stoneHud.setText(player.stones > 0 ? `💡 ${player.stones}x [O]` : '');
+
+    // ── Float texts (animação +1) ─────────────────────────────────────────
+    for (let i = this._floatTexts.length - 1; i >= 0; i--) {
+      const ft = this._floatTexts[i];
+      ft.life -= delta;
+      ft.text.y -= ft.vy * (delta / 16);
+      ft.text.setAlpha(Math.max(0, ft.life / ft.maxLife));
+      if (ft.life <= 0) { ft.text.destroy(); this._floatTexts.splice(i, 1); }
+    }
+
+    // Usar pedra de iluminação
+    if (Phaser.Input.Keyboard.JustDown(this._oKey) && player.stones > 0 && !shop.visible) {
+      player.stones -= 1;
+      const sx = Math.round(player.x);
+      const sy = Math.round(player.y);   // posição dos pés do jogador
+      this._placedStones.push({ x: sx, y: sy });
+      // Desenha a pedra no mundo (acumula, não limpa)
+      this._stoneGfx.fillStyle(0xffffff, 0.18);
+      this._stoneGfx.fillCircle(sx, sy - 4, 14);
+      this._stoneGfx.fillStyle(0xffe066, 0.9);
+      this._stoneGfx.fillCircle(sx, sy - 4, 5);
+      this._stoneGfx.fillStyle(0xffffff, 1);
+      this._stoneGfx.fillCircle(sx - 1, sy - 5, 1.5);
+    }
 
     // Altitude
     const metersFromGround = Math.round((GROUND_Y - player.y) / 10);
@@ -326,15 +584,106 @@ export class GameScene extends Phaser.Scene {
       this._altHud.setText(`⬇ ${Math.abs(metersFromGround)}m subsolo`).setColor('#ff8844');
     }
 
-    // Prompt do vendedor
-    const nearVendor = this.vendor.isNearPlayer(player);
-    this._vPrompt.setVisible(nearVendor && !shopOpen);
-    if (nearVendor) {
-      this._vPrompt.setPosition(this.vendor.x, this.vendor.y - 72);
+    // Prompt da mesa de ferramentas
+    const wb = this._workbench;
+    const nearVendor = Math.abs(player.x - wb.x) < wb.interactDist &&
+                       Math.abs(player.y - wb.y) < 100;
+
+    // ── Cabo carregador ────────────────────────────────────────────────────
+    const capsuleDist = Math.hypot(player.x - wb.x, player.y - wb.y);
+    const nearCapsule = capsuleDist < this._CABLE_MAX_DIST;
+
+    // Desconecta automaticamente se afastar demais
+    if (this._cableConnected && capsuleDist > this._CABLE_MAX_DIST) {
+      this._cableConnected = false;
     }
 
-    // Abrir/fechar loja
-    if (Phaser.Input.Keyboard.JustDown(this._vKey) && nearVendor) {
+    // Conecta/desconecta ao pressionar H
+    if (Phaser.Input.Keyboard.JustDown(this._hKey) && !shopOpen) {
+      if (nearCapsule && !this._cableConnected) {
+        this._cableConnected = true;
+      } else if (this._cableConnected) {
+        this._cableConnected = false;
+      }
+    }
+
+    // Carregamento — consome bateria da cápsula
+    if (this._cableConnected && player.fuel < player.maxFuel && wb.battery > 0) {
+      const charge = this._CHARGE_RATE * delta;
+      player.fuel  = Math.min(player.maxFuel, player.fuel + charge);
+      // 1 unidade de bateria = 1% de combustível carregado
+      wb.battery   = Math.max(0, wb.battery - charge);
+      if (wb.battery <= 0) this._cableConnected = false;
+    }
+
+    // Desenha cabo
+    this._cableGfx.clear();
+    if (this._cableConnected) {
+      const cx = wb.x + 2, cy = wb.y - 10;  // ponto de saída da cápsula
+      const px = player.x, py = player.y - 10;
+      const mx = (cx + px) / 2, my = Math.max(cy, py) + 18;  // curva para baixo
+      // Sombra do cabo
+      this._cableGfx.lineStyle(3, 0x004422, 0.40);
+      this._cableGfx.beginPath();
+      this._cableGfx.moveTo(cx, cy + 1);
+      this._cableGfx.lineTo(mx, my + 2);
+      this._cableGfx.lineTo(px, py + 1);
+      this._cableGfx.strokePath();
+      // Cabo principal (verde-elétrico)
+      this._cableGfx.lineStyle(2, 0x44ff99, 0.90);
+      this._cableGfx.beginPath();
+      this._cableGfx.moveTo(cx, cy);
+      this._cableGfx.lineTo(mx, my);
+      this._cableGfx.lineTo(px, py);
+      this._cableGfx.strokePath();
+      // Brilho pulsante no conector do jogador
+      const pulse = 0.55 + 0.45 * Math.sin(Date.now() * 0.006);
+      this._cableGfx.fillStyle(0x44ff99, pulse);
+      this._cableGfx.fillCircle(px, py, 4);
+      this._cableGfx.fillStyle(0xaaffdd, pulse * 0.6);
+      this._cableGfx.fillCircle(px, py, 7);
+    }
+
+    // Barra de bateria da cápsula (sempre visível)
+    {
+      const bx = wb.x, by = wb.y - 88;
+      const bw = 60, bh = 7;
+      const pct = wb.battery / wb.maxBattery;
+      const barColor = pct > 0.50 ? 0x44dd88 : pct > 0.20 ? 0xffcc22 : 0xff4422;
+      // Fundo
+      this._cableGfx.fillStyle(0x111111, 0.75);
+      this._cableGfx.fillRoundedRect(bx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 2);
+      // Preenchimento
+      this._cableGfx.fillStyle(barColor, 0.95);
+      this._cableGfx.fillRoundedRect(bx - bw / 2, by, Math.max(0, bw * pct), bh, 2);
+      // Borda
+      this._cableGfx.lineStyle(1, 0x88ffcc, 0.55);
+      this._cableGfx.strokeRoundedRect(bx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 2);
+      // Número à direita da barra (mesma linha)
+      if (!this._capsuleBatHud) {
+        this._capsuleBatHud = this.add.text(0, 0, '', {
+          fontFamily: 'monospace', fontSize: '10px', color: '#88ffcc',
+          stroke: '#000', strokeThickness: 2,
+        }).setOrigin(0, 0.5).setDepth(4);
+      }
+      this._capsuleBatHud.setText(`🔋 ${Math.ceil(wb.battery)}`);
+      this._capsuleBatHud.setPosition(bx + bw / 2 + 5, by + bh / 2);
+    }
+
+    // Prompts [L] e [H] na mesma linha, acima da barra
+    const capsuleDist2 = Math.hypot(player.x - wb.x, player.y - wb.y);
+    const showPrompts  = (nearVendor || this._cableConnected || capsuleDist2 < this._CABLE_MAX_DIST) && !shopOpen;
+    this._vPrompt.setVisible(showPrompts);
+    this._cablePrompt.setVisible(false);  // fundido no _vPrompt
+    if (showPrompts) {
+      const cableLabel = this._cableConnected ? `⚡[H] desconectar` : `[H] cabo`;
+      this._vPrompt
+        .setText(`[L] Mesa  |  ${cableLabel}`)
+        .setPosition(wb.x, wb.y - 140);
+    }
+
+    // Abrir/fechar mesa
+    if (Phaser.Input.Keyboard.JustDown(this._lKey) && nearVendor) {
       const wasOpen = shop.visible;
       shop.toggle();
       if (!wasOpen) this._snd.sfxShopOpen();
@@ -349,20 +698,36 @@ export class GameScene extends Phaser.Scene {
   }
 
   // ── Fundo do céu (fixo na tela) ────────────────────────────────────────────
-  _drawBackground() {
+  _spawnFloatText(wx, wy, msg, color = '#ffffff') {
+    const camY = this.cameras.main.scrollY;
+    const t = this.add.text(wx, wy - camY - 20, msg, {
+      fontFamily: 'monospace', fontSize: '13px', color,
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(15).setScrollFactor(0);
+    this._floatTexts.push({ text: t, vy: 0.9, life: 900, maxLife: 900 });
+  }
+
+  _drawBackground(starOffsetY = 0, time = 0) {
     const g = this._bg;
     // Gradiente que muda de céu noturno (topo) para tom mais escuro (fundo)
     g.fillGradientStyle(0x060b18, 0x060b18, 0x0a1428, 0x0a1428, 1);
     g.fillRect(0, 0, W, H);
 
-    // Estrelas (em coordenadas de tela, bg fixo)
-    const rng = new Phaser.Math.RandomDataGenerator(['landaria2d']);
-    g.fillStyle(0xffffff, 1);
-    for (let i = 0; i < 140; i++) {
-      const sx = rng.between(0, W);
-      const sy = rng.between(0, H - 20);
-      const ss = rng.realInRange(0.4, 1.8);
-      g.fillCircle(sx, sy, ss);
+    // Estrelas com parallax vertical suave
+    if (this._starData) {
+      for (const s of this._starData) {
+        const sy = ((s.y + starOffsetY) % H + H) % H;  // wrap vertical
+        const twinkle = 0.55 + 0.45 * Math.sin(time * 0.0015 + s.twinkle);
+        g.fillStyle(0xffffff, twinkle);
+        g.fillCircle(s.x, sy, s.r);
+      }
+    } else {
+      // Fallback estático (antes dos dados estarem prontos)
+      const rng = new Phaser.Math.RandomDataGenerator(['landaria2d']);
+      g.fillStyle(0xffffff, 1);
+      for (let i = 0; i < 140; i++) {
+        g.fillCircle(rng.between(0, W), rng.between(0, H - 20), rng.realInRange(0.4, 1.8));
+      }
     }
 
     // Lua
@@ -434,14 +799,128 @@ export class GameScene extends Phaser.Scene {
     g.fillEllipse(cx, cy + ch * 0.6, cw * 0.78, 10);
   }
 
-  // ── Placa do vendedor (texto de cena, estático) ───────────────────────────
-  _drawVendorSign() {
-    this.add.text(VENDOR_X, CLOUD_Y - 78, '🪄 Loja', {
-      fontFamily: 'monospace', fontSize: '11px', color: '#ffd700',
+  // ── Placa do vendedor (removida)
+  _drawVendorSign() {}
+
+  // ── Cápsula de emergência (caiu na superfície, lado esquerdo) ──────────
+  _drawWorkbench() {
+    const g = this._workbenchGfx;
+    const x = WORKBENCH_X;
+    const y = GROUND_Y;
+
+    // ── Marca de impacto no chão ──────────────────────────────────────────
+    g.fillStyle(0x1a0d00, 0.70);
+    g.fillEllipse(x + 8, y - 2, 130, 14);
+    g.fillStyle(0x2d1500, 0.40);
+    g.fillEllipse(x + 4, y - 1, 90, 8);
+
+    // ── Sulcos de aterragem ────────────────────────────────────────────────
+    g.lineStyle(2, 0x1a0d00, 0.6);
+    g.lineBetween(x - 55, y - 1, x - 10, y - 1);
+    g.lineBetween(x + 20, y - 1, x + 65, y - 1);
+
+    // ── Corpo da cápsula (óvalo metálico, ligeiramente inclinada) ─────────
+    const tx = 7;   // deslocamento horizontal do topo (inclinação)
+    const bw = 42, bh = 52;
+
+    // Casco exterior (cinza escuro)
+    g.fillStyle(0x3e4452, 1);
+    g.fillPoints([
+      { x: x - bw / 2 + tx, y: y - bh },
+      { x: x + bw / 2 + tx, y: y - bh },
+      { x: x + bw / 2,      y: y },
+      { x: x - bw / 2,      y: y },
+    ], true);
+
+    // Domo superior (meio-elipse — parte mais clara)
+    g.fillStyle(0x6a7284, 1);
+    g.fillEllipse(x + tx, y - bh, bw + 6, 24);
+
+    // Painel lateral esquerdo (dano de impacto — motim)
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillPoints([
+      { x: x - bw / 2 + tx + 2, y: y - bh + 6 },
+      { x: x - bw / 2 + tx + 10, y: y - bh + 8 },
+      { x: x - bw / 2 + 8,       y: y - 14 },
+      { x: x - bw / 2 + 2,       y: y - 12 },
+    ], true);
+
+    // Linhas de painel estrutural
+    g.lineStyle(1, 0x2a2f3a, 0.9);
+    g.lineBetween(x - 12 + tx * 0.5, y - bh + 10, x - 12, y - 6);
+    g.lineBetween(x + 14 + tx * 0.5, y - bh + 10, x + 14, y - 6);
+    g.lineBetween(x      + tx * 0.3, y - bh + 14, x,      y - 6);
+
+    // ── Escotilha aberta (pivoted atrás) ───────────────────────────────────
+    // Painéis da escotilha — um aberto para a esquerda, inclinado
+    g.fillStyle(0x505868, 1);
+    g.fillPoints([
+      { x: x + tx - 2,  y: y - bh + 6 },   // dobradiça sup
+      { x: x + tx + 14, y: y - bh + 6 },
+      { x: x + tx + 10, y: y - bh - 24 },   // ponta do painel aberto
+      { x: x + tx - 6,  y: y - bh - 24 },
+    ], true);
+    // Interior escuro da escotilha
+    g.fillStyle(0x0a0c12, 1);
+    g.fillRect(x + tx - 1, y - bh + 7, 14, 20);
+    // Cabo da escotilha
+    g.fillStyle(0x888a95, 1);
+    g.fillRect(x + tx + 4, y - bh + 9, 3, 14);
+
+    // ── Visor lateral (olho da cápsula) ────────────────────────────────────
+    g.fillStyle(0x112255, 0.95);
+    g.fillEllipse(x + tx + 12, y - bh * 0.50, 14, 10);
+    g.lineStyle(2, 0x6688bb, 1);
+    g.strokeEllipse(x + tx + 12, y - bh * 0.50, 14, 10);
+    // Reflexo
+    g.fillStyle(0x4466cc, 0.35);
+    g.fillEllipse(x + tx + 10, y - bh * 0.50 - 2, 6, 4);
+
+    // ── Faixas de aviso (laranja/preto) ────────────────────────────────────
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(i % 2 === 0 ? 0xff8800 : 0x1a1a1a, 1);
+      g.fillRect(x - bw / 2 + 3 + i * 8, y - 11, 7, 9);
+    }
+
+    // ── Luz de aviso (vermelha pulsante — estática laranja) ────────────────
+    g.fillStyle(0xff2200, 1);
+    g.fillCircle(x - bw / 2 + tx + 1, y - bh + 4, 4);
+    g.fillStyle(0xff6644, 0.30);
+    g.fillCircle(x - bw / 2 + tx + 1, y - bh + 4, 8);
+
+    // ── Destroços ao redor ─────────────────────────────────────────────────
+    g.fillStyle(0x5a5e68, 1);
+    g.fillRect(x + 52, y - 7, 10, 4);
+    g.fillPoints([
+      { x: x + 64, y: y - 4 },
+      { x: x + 74, y: y - 13 },
+      { x: x + 76, y: y - 10 },
+      { x: x + 66, y: y - 2 },
+    ], true);
+    g.fillStyle(0x484c56, 1);
+    g.fillRect(x - 60, y - 6, 12, 4);
+    g.fillRect(x + 40, y - 4, 7, 3);
+    // Fragmento de painel
+    g.fillPoints([
+      { x: x - 62, y: y - 6 },
+      { x: x - 50, y: y - 12 },
+      { x: x - 48, y: y - 9 },
+      { x: x - 60, y: y - 3 },
+    ], true);
+
+    // ── Fumaça (círculos semi-transparentes) ──────────────────────────────
+    g.fillStyle(0x888888, 0.12);
+    g.fillCircle(x + tx - 5, y - bh - 10, 14);
+    g.fillStyle(0x666666, 0.08);
+    g.fillCircle(x + tx,     y - bh - 22, 10);
+
+    // ── Label flutuante ────────────────────────────────────────────────────
+    this.add.text(x + 8, y - bh - 52, '🚨 Cápsula de Emergência', {
+      fontFamily: 'monospace', fontSize: '11px', color: '#ff8844',
       stroke: '#000', strokeThickness: 2,
-      backgroundColor: '#3a1060',
+      backgroundColor: '#1a0800',
       padding: { x: 5, y: 3 },
-    }).setOrigin(0.5).setDepth(2);
+    }).setOrigin(0.5).setDepth(3);
   }
 
   _buildAudioModal(container) {
@@ -490,7 +969,7 @@ export class GameScene extends Phaser.Scene {
                  fontWeight: 'bold', letterSpacing: '1px' });
     panel.appendChild(title);
 
-    // Helper: criar linha label + slider + valor
+    // Helper: criar linha label + slider + valor + mute
     const makeSlider = (label, initial, onChange) => {
       const row = document.createElement('div');
       css(row, { display: 'flex', alignItems: 'center', marginBottom: '16px', gap: '10px' });
@@ -511,12 +990,39 @@ export class GameScene extends Phaser.Scene {
       val.textContent = slider.value + '%';
       css(val, { width: '38px', textAlign: 'right', color: '#ffdd88' });
 
+      // Botão mute inline
+      let muted = false, savedVol = null;
+      const muteBtn = document.createElement('button');
+      muteBtn.textContent = '🔔';
+      css(muteBtn, {
+        background: 'none', border: 'none', cursor: 'pointer',
+        fontSize: '16px', padding: '0 2px', lineHeight: '1',
+      });
+      muteBtn.title = 'Mute';
+      muteBtn.addEventListener('click', () => {
+        muted = !muted;
+        if (muted) {
+          savedVol = Number(slider.value) / 100;
+          onChange(0);
+          slider.value = '0';
+          val.textContent = '0%';
+          muteBtn.textContent = '🔕';
+        } else {
+          const v = savedVol ?? 0.5;
+          onChange(v);
+          slider.value = String(Math.round(v * 100));
+          val.textContent = slider.value + '%';
+          muteBtn.textContent = '🔔';
+        }
+      });
+
       slider.addEventListener('input', () => {
         val.textContent = slider.value + '%';
         onChange(Number(slider.value) / 100);
+        if (muted && slider.value !== '0') { muted = false; muteBtn.textContent = '🔔'; }
       });
 
-      row.append(lbl, slider, val);
+      row.append(lbl, slider, val, muteBtn);
       panel.appendChild(row);
       return slider;
     };
