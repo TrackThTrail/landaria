@@ -76,30 +76,37 @@ export class TerrainGrid {
 
         const wx = col * cs;
 
-        // Cor da terra: castanho (superfície) → quase preto (fundo)
-        const rv = Math.round(58  * (1 - depthT) + 18 * depthT);
-        const gv = Math.round(26  * (1 - depthT) + 10 * depthT);
-        const bv = Math.round(10  * (1 - depthT) +  4 * depthT);
+        // Cor do regolito lunar: cinza claro (superfície) → cinza escuro/preto (fundo)
+        const rv = Math.round(168 * (1 - depthT) + 30 * depthT);
+        const gv = Math.round(164 * (1 - depthT) + 28 * depthT);
+        const bv = Math.round(160 * (1 - depthT) + 26 * depthT);
         g.fillStyle((rv << 16) | (gv << 8) | bv, 1);
         g.fillRect(wx, wy, cs - 1, cs - 1);
 
-        // Pedriscos decorativos
+        // Pedriscos lunares (tons de cinza variados)
         const seed = (row * 31 + col * 17) & 0xffff;
-        if (seed % 9 === 0) {
-          g.fillStyle(0x5a3015, 0.55);
-          g.fillCircle(wx + 10, wy + cs * 0.42, 5);
+        if (seed % 7 === 0) {
+          g.fillStyle(0x9a9890, 0.60);
+          g.fillCircle(wx + 8 + (seed % 18), wy + cs * 0.40 + (seed % 8), 3 + (seed % 3));
         }
-        if (seed % 13 === 0) {
-          g.fillStyle(0x7a4020, 0.45);
-          g.fillRect(wx + 20, wy + cs * 0.22, 10, 6);
+        if (seed % 11 === 0) {
+          g.fillStyle(0xb8b6b0, 0.45);
+          g.fillRect(wx + 14 + (seed % 16), wy + cs * 0.25 + (seed % 10), 7, 4);
+        }
+        if (seed % 17 === 0) {
+          // cratera pequena
+          g.fillStyle(0x707070, 0.30);
+          g.fillCircle(wx + 22 + (seed % 12), wy + cs * 0.50 + (seed % 10), 4);
+          g.fillStyle(0xd0cec8, 0.20);
+          g.fillCircle(wx + 21 + (seed % 12), wy + cs * 0.49 + (seed % 10), 2.5);
         }
 
-        // Faixa de grama só na primeira linha
+        // Superfície lunar: linha cinza-clara no topo
         if (row === 0) {
-          g.fillStyle(0x3a8822, 1);
-          g.fillRect(wx, wy, cs - 1, 8);
-          g.fillStyle(0x66ee44, 0.45);
-          g.fillRect(wx, wy, cs - 1, 3);
+          g.fillStyle(0xd8d6d0, 1);
+          g.fillRect(wx, wy, cs - 1, 5);
+          g.fillStyle(0xf0eee8, 0.50);
+          g.fillRect(wx, wy, cs - 1, 2);
         }
       }
     }

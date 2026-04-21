@@ -37,6 +37,8 @@ export class GameScene extends Phaser.Scene {
     this._wasd     = this.input.keyboard.addKeys({
       left:  Phaser.Input.Keyboard.KeyCodes.A,
       right: Phaser.Input.Keyboard.KeyCodes.D,
+      up:    Phaser.Input.Keyboard.KeyCodes.W,
+      down:  Phaser.Input.Keyboard.KeyCodes.S,
     });
     this._spaceKey  = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this._gKey      = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.G);
@@ -44,8 +46,8 @@ export class GameScene extends Phaser.Scene {
     this._escKey    = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
     this._sKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S);
     this._fKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F);
-    this._mineTimer    = 0;
-    this._mineTimerH   = 0;  // timer para escavação horizontal
+    this._mineTimerH   = 0;  // timer de escavação direcional
+    this._drillTarget  = null; // bloco alvo para flash
     this._drillingAudio  = false;
     this._drillingAudioH = false;
 
@@ -114,16 +116,18 @@ export class GameScene extends Phaser.Scene {
     const shopOpen = shop.visible;
 
     const spaceJustDown = !shopOpen && Phaser.Input.Keyboard.JustDown(this._spaceKey);
+    const wJustDown     = !shopOpen && !player.hasDrill && Phaser.Input.Keyboard.JustDown(w.up);
+    const jumpJustDown  = (spaceJustDown || wJustDown) && player.isOnGround;
     const input = {
       left:             !shopOpen && (c.left.isDown  || w.left.isDown),
       right:            !shopOpen && (c.right.isDown || w.right.isDown),
-      jumpJustDown:     spaceJustDown && player.isOnGround,
-      parachuteToggle:  spaceJustDown && !player.isOnGround,
+      jumpJustDown,
+      parachuteToggle:  (spaceJustDown || wJustDown) && !player.isOnGround,
     };
 
     // ── SFX pulo / paraquedas ────────────────────────────────────────────
     if (input.jumpJustDown) this._snd.sfxJump();
-    if (input.parachuteToggle && !player.parachuteOpen) this._snd.sfxParachute();
+    if (input.parachuteToggle && !player.parachuteOpen && player.hasParachute) this._snd.sfxParachute();
 
     player.update(input, delta, this._platforms);
 
@@ -153,16 +157,32 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // ── Vertical (teto) ─────────────────────────────────────────────────
+      // Só pelo centro para não ser confundido com paredes laterais.
+      if (player.vy < 0) {
+        const ceilRow = Math.floor((playerTop - GROUND_Y) / cs);
+        if (ceilRow >= 0) {
+          const col = Math.floor(player.x / cs);
+          if (this._terrain.isSolid(col, ceilRow)) {
+            // empurra os pés para baixo do bloco de teto
+            player.y  = GROUND_Y + (ceilRow + 1) * cs + player.baseH;
+            player.vy = 0;
+          }
+        }
+      }
+
       // ── Horizontal (paredes) ────────────────────────────────────────────
-      const rowEnd   = Math.floor((player.y      - GROUND_Y) / cs);
-      const rowStart = Math.max(0, Math.floor((playerTop - GROUND_Y) / cs));
+      // Recalcula playerTop com player.y já corrigido pelas resoluções verticais
+      const playerTopH = player.y - player.baseH;
+      const rowEnd   = Math.floor((player.y       - GROUND_Y) / cs);
+      const rowStart = Math.max(0, Math.floor((playerTopH - GROUND_Y) / cs));
       if (rowEnd >= 0) {
         // Lado direito
         const rightCol = Math.floor((player.x + hw) / cs);
         outer_r: for (let r = rowStart; r <= rowEnd; r++) {
           if (!this._terrain.isSolid(rightCol, r)) continue;
           const rTop = GROUND_Y + r * cs;
-          if (player.y > rTop && playerTop < rTop + cs) {
+          if (player.y > rTop && playerTopH < rTop + cs) {
             player.x  = rightCol * cs - hw - 0.5;
             player.vx = Math.min(0, player.vx);
             break outer_r;
@@ -173,7 +193,7 @@ export class GameScene extends Phaser.Scene {
         outer_l: for (let r = rowStart; r <= rowEnd; r++) {
           if (!this._terrain.isSolid(leftCol, r)) continue;
           const rTop = GROUND_Y + r * cs;
-          if (player.y > rTop && playerTop < rTop + cs) {
+          if (player.y > rTop && playerTopH < rTop + cs) {
             player.x  = (leftCol + 1) * cs + hw + 0.5;
             player.vx = Math.max(0, player.vx);
             break outer_l;
@@ -185,72 +205,100 @@ export class GameScene extends Phaser.Scene {
     // ── Toggle escavadeira (F) ───────────────────────────────────────────
     if (Phaser.Input.Keyboard.JustDown(this._fKey)) {
       player.hasDrill = !player.hasDrill;
+      if (!player.hasDrill) {
+        // guarda a escavadeira — para tudo
+        player.isDrillingH = false;
+        player.drillDirX = 1; player.drillDirY = 0;
+        this._drillTarget = null;
+        this._mineTimerH  = 0;
+        if (this._drillingAudioH) { this._snd.sfxDigStop(); this._drillingAudioH = false; }
+      }
     }
 
-    // ── Escavação para baixo (S) — só com escavadeira em mãos ─────────────
-    const canDrill = player.hasDrill && this._sKey.isDown && player.isOnGround && player.y >= GROUND_Y && player.fuel > 0;
-    if (canDrill) {
-      player.setDrilling(true, delta);
-      if (!this._drillingAudio) {
-        this._drillingAudio = true;
-        this._snd.init();
-        this._snd.sfxDigStart();
-      }
-      this._mineTimer += delta;
-      if (this._mineTimer >= 350) {
-        this._mineTimer = 0;
-        const { col: mc, row: mr } = this._terrain.cellUnder(player.x, player.y);
-        if (this._terrain.dig(mc, mr)) {
-          player.drainFuel(3);
-          this._snd.sfxDigImpact();
+    // ── Escavação direcional (WASD / arrows) com escavadeira em mãos ──────
+    if (player.hasDrill && player.fuel > 0) {
+      // Direção pedida pelo jogador
+      const digLeft  = this._wasd.left.isDown  || this._cursors.left.isDown;
+      const digRight = this._wasd.right.isDown || this._cursors.right.isDown;
+      const digUp    = this._wasd.up.isDown    || this._cursors.up.isDown;
+      const digDown  = this._wasd.down.isDown  || this._cursors.down.isDown;
+
+      const dx = (digRight ? 1 : 0) - (digLeft ? 1 : 0);
+      const dy = (digDown  ? 1 : 0) - (digUp   ? 1 : 0);
+      const digging = dx !== 0 || dy !== 0;
+
+      if (digging) {
+        // Atualiza direção e animação da escavadeira
+        player.drillDirX = dx;
+        player.drillDirY = dy;
+        player.isDrillingH = true;
+        player.drillTime  += delta;
+
+        // Calcula célula-alvo (a partir do centro do personagem, 1 célula na direção)
+        const cs       = CELL_SIZE;
+        const centerX  = player.x;
+        const centerY  = player.y - player.baseH * 0.5;
+        const targetWX = centerX + dx * cs;
+        const targetWY = centerY + dy * cs;
+        const tCol     = Math.floor(targetWX / cs);
+        const tRow     = Math.floor((targetWY - GROUND_Y) / cs);
+
+        const targetIsValid = tRow >= 0 && this._terrain.isSolid(tCol, tRow);
+
+        if (targetIsValid) {
+          // Salva alvo para o flash
+          this._drillTarget = { col: tCol, row: tRow };
+          this._mineTimerH += delta;
+
+          if (!this._drillingAudioH) {
+            this._drillingAudioH = true;
+            this._snd.init();
+            this._snd.sfxDigStart();
+          }
+
+          if (this._mineTimerH >= 350) {
+            this._mineTimerH = 0;
+            if (this._terrain.dig(tCol, tRow)) {
+              player.drainFuel(3);
+              this._snd.sfxDigImpact();
+            }
+          }
+        } else {
+          // Aponta para a direção mas não está em contato com bloco
+          this._drillTarget = null;
+          this._mineTimerH  = 0;
+          if (this._drillingAudioH) { this._snd.sfxDigStop(); this._drillingAudioH = false; }
         }
+      } else {
+        // Sem tecla — escavadeira parada, aponta para o facing
+        player.drillDirX   = player.facing;
+        player.drillDirY   = 0;
+        player.isDrillingH = false;
+        this._drillTarget  = null;
+        this._mineTimerH   = 0;
+        if (this._drillingAudioH) { this._snd.sfxDigStop(); this._drillingAudioH = false; }
       }
     } else {
-      if (this._drillingAudio && !this._drillingAudioH) {
-        this._drillingAudio = false;
-        this._snd.sfxDigStop();
-      }
-      player.setDrilling(false, delta);
-      this._mineTimer = 0;
-    }
-
-    // ── Escavação lateral — encostar na parede com escavadeira em mãos ────
-    const hw = player.baseW / 2 - 1;
-    const cs = CELL_SIZE;
-    const playerTop  = player.y - player.baseH;
-    const rowEnd     = Math.floor((player.y   - GROUND_Y) / cs);
-    const rowMid     = Math.max(0, Math.floor((player.y - player.baseH * 0.5 - GROUND_Y) / cs));
-    const touchRight = player.hasDrill && rowEnd >= 0 && this._terrain.isSolid(Math.floor((player.x + hw + 1) / cs), rowMid);
-    const touchLeft  = player.hasDrill && rowEnd >= 0 && this._terrain.isSolid(Math.floor((player.x - hw - 1) / cs), rowMid);
-    const touchWall  = touchRight || touchLeft;
-
-    if (touchWall && player.fuel > 0) {
-      player.setDrillingH(true, delta);
-      if (!this._drillingAudioH) {
-        this._drillingAudioH = true;
-        if (!this._drillingAudio) { this._snd.init(); this._snd.sfxDigStart(); }
-      }
-      this._mineTimerH += delta;
-      if (this._mineTimerH >= 350) {
-        this._mineTimerH = 0;
-        const wallCol = touchRight
-          ? Math.floor((player.x + hw + 1) / cs)
-          : Math.floor((player.x - hw - 1) / cs);
-        if (this._terrain.dig(wallCol, rowMid)) {
-          player.drainFuel(3);
-          this._snd.sfxDigImpact();
-        }
-      }
-    } else {
-      if (this._drillingAudioH && !this._drillingAudio) {
-        this._snd.sfxDigStop();
-      }
-      this._drillingAudioH = false;
-      player.setDrillingH(false, delta);
-      this._mineTimerH = 0;
+      player.isDrillingH = false;
+      this._drillTarget  = null;
+      this._mineTimerH   = 0;
+      if (this._drillingAudioH) { this._snd.sfxDigStop(); this._drillingAudioH = false; }
     }
 
     player.draw(this.gfx);
+
+    // ── Flash do bloco-alvo ──────────────────────────────────────────────
+    if (this._drillTarget) {
+      const { col, row } = this._drillTarget;
+      const cs = CELL_SIZE;
+      const bx = col * cs;
+      const by = GROUND_Y + row * cs;
+      // pisca a ~8 Hz usando sin (alpha varia 0.25–0.85)
+      const flashAlpha = 0.55 + 0.35 * Math.sin(Date.now() * 0.05);
+      this.gfx.fillStyle(0xffffff, flashAlpha);
+      this.gfx.fillRect(bx, by, cs, cs);
+    }
+
     player.drawHud(this.hudGfx, this.nameText, this.levelText);
 
     // SFX passos
