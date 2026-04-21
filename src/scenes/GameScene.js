@@ -6,7 +6,7 @@ import { TerrainGrid } from '../terrain/TerrainGrid.js';
 import { SoundEngine } from '../audio/SoundEngine.js';
 
 export class GameScene extends Phaser.Scene {
-  constructor() { super('Game'); }
+  constructor() { super('GameScene'); }
 
   create() {
     // ── Layers (ordem: bg → estáticos → dinâmicos → HUD) ─────────────────
