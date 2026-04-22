@@ -39,7 +39,8 @@ export class GameScene extends Phaser.Scene {
     this._wakeupDone  = false;
     // ── workbench (mesa de ferramentas na superfície, lado esquerdo) ──────
     this._workbench = { x: WORKBENCH_X, y: GROUND_Y, interactDist: 110,
-                        battery: 1000, maxBattery: 1000 };
+                        battery: 1000, maxBattery: 1000,
+                        oxygen: 1000,  maxOxygen: 1000 };
 
     // ── Pedras de Iluminação colocadas no mundo ───────────────────────────
     this._placedStones  = [];   // [{ x, y }] em coords de mundo
@@ -84,6 +85,8 @@ export class GameScene extends Phaser.Scene {
     this._jKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this._mKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
     this._qKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+    this._tJustDown    = false;
+    this.input.keyboard.on('keydown-T', () => { this._tJustDown = true; });
     this._mineTimerH   = 0;  // timer de escavação direcional
     this._drillTarget  = null; // bloco alvo para flash
     this._drillingAudio  = false;
@@ -160,6 +163,15 @@ export class GameScene extends Phaser.Scene {
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
+    // Tempo de jogo — acumulado em ms
+    this._worldTime = 0;
+
+    // HUD temporizador — reposicionado dinamicamente à esquerda do altitude
+    this._timeHud = this.add.text(0, 12, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#ffeeaa',
+      stroke: '#000', strokeThickness: 3,
+    }).setOrigin(1, 0).setDepth(10).setScrollFactor(0);
+
     // HUD altitude — canto superior direito
     this._altHud = this.add.text(W - 12, 12, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#88ddff',
@@ -177,6 +189,13 @@ export class GameScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: '12px', color: '#88ffcc',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5).setVisible(false).setDepth(5);
+
+    // ── Slot de equipamento ativo (rodapé) ──────────────────────────────────────
+    this._equipGfx  = this.add.graphics().setDepth(10).setScrollFactor(0);
+    this._equipText = this.add.text(W / 2, H - 28, '', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#ffffff',
+      stroke: '#000', strokeThickness: 3, align: 'center',
+    }).setOrigin(0.5, 0.5).setDepth(11).setScrollFactor(0);
 
     // ── Terreno + Estáticos ────────────────────────────────────────────────
     this._terrain = new TerrainGrid(GROUND_Y, WORLD_H, W, CELL_SIZE);
@@ -423,6 +442,7 @@ export class GameScene extends Phaser.Scene {
     // ── Toggle escavadeira (F) ───────────────────────────────────────────
     if (Phaser.Input.Keyboard.JustDown(this._fKey)) {
       player.hasDrill = !player.hasDrill;
+      if (player.hasDrill) player.lanternOn = false;  // desliga lanterna
       if (!player.hasDrill) {
         // guarda a escavadeira — para tudo
         player.isDrillingH = false;
@@ -694,6 +714,27 @@ export class GameScene extends Phaser.Scene {
           ctx.arc(sx, sy, R, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
+
+          // ── 6. Cone da lanterna (dentro do bloco underground) ─────────────
+          if (player.lanternOn && player.lanterns > 0) {
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-out';
+            const coneLen   = 240;
+            const halfAng   = Math.PI / 6;  // ±30°
+            const centerAng = player.facing === 1 ? 0 : Math.PI;
+            const grdC = ctx.createRadialGradient(sx, sy, 0, sx, sy, coneLen);
+            grdC.addColorStop(0,    'rgba(0,0,0,1)');
+            grdC.addColorStop(0.65, 'rgba(0,0,0,0.92)');
+            grdC.addColorStop(0.88, 'rgba(0,0,0,0.50)');
+            grdC.addColorStop(1.0,  'rgba(0,0,0,0)');
+            ctx.fillStyle = grdC;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.arc(sx, sy, coneLen, centerAng - halfAng, centerAng + halfAng);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
         }
 
         // ── 5. Pedras colocadas: cada uma abre um círculo de luz em gradiente ─────
@@ -925,6 +966,17 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
+    // Temporizador de jogo
+    this._worldTime += delta;
+    {
+      const DAY_MS  = 10 * 60 * 1000;   // 10 minutos por dia
+      const HOUR_MS = DAY_MS / 24;      // ~25 s por hora de jogo
+      const totalMs = this._worldTime;
+      const day  = Math.floor(totalMs / DAY_MS) + 1;
+      const hour = Math.floor((totalMs % DAY_MS) / HOUR_MS);
+      this._timeHud.setText(`Dia ${day}  ${String(hour).padStart(2, '0')}h`);
+    }
+
     // Altitude
     const metersFromGround = Math.round((GROUND_Y - player.y) / 10);
     if (metersFromGround >= 0) {
@@ -932,6 +984,8 @@ export class GameScene extends Phaser.Scene {
     } else {
       this._altHud.setText(`⬇ ${Math.abs(metersFromGround)}m subsolo`).setColor('#ff8844');
     }
+    // Posiciona temporizador à esquerda do medidor de altitude
+    this._timeHud.setX(W - 12 - this._altHud.width - 14);
 
     // Prompt da mesa de ferramentas
     const wb = this._workbench;
@@ -979,8 +1033,14 @@ export class GameScene extends Phaser.Scene {
     // ── Oxigênio ──────────────────────────────────────────────────────────
     if (!this._gameOverActive && this._wakeupDone) {
       if (this._cableConnected) {
-        // Cabo conectado: regenera oxigênio
-        player.oxygen = Math.min(player.maxOxygen, player.oxygen + this._OXY_REGEN * delta);
+        // Cabo conectado: regenera oxigênio (consome reserva da cápsula)
+        const oxyGain = Math.min(
+          this._OXY_REGEN * delta,
+          player.maxOxygen - player.oxygen,
+          wb.oxygen
+        );
+        player.oxygen = Math.min(player.maxOxygen, player.oxygen + oxyGain);
+        wb.oxygen     = Math.max(0, wb.oxygen - oxyGain);
       } else {
         // Sempre consome oxigênio (ambiente lunar hostil)
         player.oxygen = Math.max(0, player.oxygen - this._OXY_DRAIN * delta);
@@ -1027,22 +1087,20 @@ export class GameScene extends Phaser.Scene {
       this._cableGfx.fillCircle(px, py, 7);
     }
 
-    // Barra de bateria da cápsula (apenas no quadrante inicial)
+    // Barras de bateria e oxigênio da cápsula (apenas no quadrante inicial)
     if (this._qx === 0) {
-      const bx = wb.x, by = wb.y - 88;
-      const bw = 60, bh = 7;
-      const pct = wb.battery / wb.maxBattery;
-      const barColor = pct > 0.50 ? 0x44dd88 : pct > 0.20 ? 0xffcc22 : 0xff4422;
-      // Fundo
+      const bx = wb.x, bw = 60, bh = 7;
+
+      // ── Bateria ──
+      const batY  = wb.y - 88;
+      const batPct = wb.battery / wb.maxBattery;
+      const batColor = batPct > 0.50 ? 0x44dd88 : batPct > 0.20 ? 0xffcc22 : 0xff4422;
       this._cableGfx.fillStyle(0x111111, 0.75);
-      this._cableGfx.fillRoundedRect(bx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 2);
-      // Preenchimento
-      this._cableGfx.fillStyle(barColor, 0.95);
-      this._cableGfx.fillRoundedRect(bx - bw / 2, by, Math.max(0, bw * pct), bh, 2);
-      // Borda
+      this._cableGfx.fillRoundedRect(bx - bw / 2 - 1, batY - 1, bw + 2, bh + 2, 2);
+      this._cableGfx.fillStyle(batColor, 0.95);
+      this._cableGfx.fillRoundedRect(bx - bw / 2, batY, Math.max(0, bw * batPct), bh, 2);
       this._cableGfx.lineStyle(1, 0x88ffcc, 0.55);
-      this._cableGfx.strokeRoundedRect(bx - bw / 2 - 1, by - 1, bw + 2, bh + 2, 2);
-      // Número à direita da barra (mesma linha)
+      this._cableGfx.strokeRoundedRect(bx - bw / 2 - 1, batY - 1, bw + 2, bh + 2, 2);
       if (!this._capsuleBatHud) {
         this._capsuleBatHud = this.add.text(0, 0, '', {
           fontFamily: 'monospace', fontSize: '10px', color: '#88ffcc',
@@ -1050,7 +1108,26 @@ export class GameScene extends Phaser.Scene {
         }).setOrigin(0, 0.5).setDepth(4);
       }
       this._capsuleBatHud.setText(`🔋 ${Math.ceil(wb.battery)}`);
-      this._capsuleBatHud.setPosition(bx + bw / 2 + 5, by + bh / 2);
+      this._capsuleBatHud.setPosition(bx + bw / 2 + 5, batY + bh / 2);
+
+      // ── Oxigênio ──
+      const oxyY   = wb.y - 76;
+      const oxyPct = wb.oxygen / wb.maxOxygen;
+      const oxyColor = oxyPct > 0.50 ? 0x44bbff : oxyPct > 0.20 ? 0xffcc22 : 0xff4422;
+      this._cableGfx.fillStyle(0x111111, 0.75);
+      this._cableGfx.fillRoundedRect(bx - bw / 2 - 1, oxyY - 1, bw + 2, bh + 2, 2);
+      this._cableGfx.fillStyle(oxyColor, 0.95);
+      this._cableGfx.fillRoundedRect(bx - bw / 2, oxyY, Math.max(0, bw * oxyPct), bh, 2);
+      this._cableGfx.lineStyle(1, 0x88ccff, 0.55);
+      this._cableGfx.strokeRoundedRect(bx - bw / 2 - 1, oxyY - 1, bw + 2, bh + 2, 2);
+      if (!this._capsuleOxyHud) {
+        this._capsuleOxyHud = this.add.text(0, 0, '', {
+          fontFamily: 'monospace', fontSize: '10px', color: '#88ccff',
+          stroke: '#000', strokeThickness: 2,
+        }).setOrigin(0, 0.5).setDepth(4);
+      }
+      this._capsuleOxyHud.setText(`🫁 ${Math.ceil(wb.oxygen)}`);
+      this._capsuleOxyHud.setPosition(bx + bw / 2 + 5, oxyY + bh / 2);
     }
 
     // Prompts [L] e [H] na mesma linha, acima da barra
@@ -1072,6 +1149,23 @@ export class GameScene extends Phaser.Scene {
       if (!wasOpen) this._snd.sfxShopOpen();
       else          this._snd.sfxShopClose();
     }
+    // Lanterna [T]
+    if (this._tJustDown && !shopOpen) {
+      this._tJustDown = false;
+      if (player.lanterns > 0) {
+        player.lanternOn = !player.lanternOn;
+        if (player.lanternOn) {
+          // desliga escavadeira
+          player.hasDrill    = false;
+          player.isDrillingH = false;
+          player.drillDirX   = 1; player.drillDirY = 0;
+          this._drillTarget  = null;
+          this._mineTimerH   = 0;
+        }
+      }
+    }
+    this._tJustDown = false;
+
     // Inventário [I]
     if (Phaser.Input.Keyboard.JustDown(this._iKey) && !shop.visible && !this.missionLog.visible && !this.mapView.visible) {
       this.inventory.toggle();
@@ -1090,6 +1184,72 @@ export class GameScene extends Phaser.Scene {
       this.inventory.close();
       this.missionLog.close();
       this.mapView.close();
+    }
+
+    // ── Slot de equipamento ativo (rodapé) ──────────────────────────────────────────
+    {
+      const SW = 40, SH = 40;        // slot interno
+      const BW = 160, BH = 50;       // barra de fundo
+      const bx = W / 2 - BW / 2;
+      const by = H - BH;             // encostado na base da tela
+      const sx = W / 2 - SW / 2;
+      const sy = by + (BH - SH) / 2; // slot centralizado verticalmente na barra
+
+      let icon = '';
+      let col  = 0xffffff;
+      if (player.hasDrill)                               { icon = '⛏️'; col = 0xe8a060; }
+      else if (player.lanternOn && player.lanterns > 0)  { icon = '🔦'; col = 0xffdd88; }
+
+      this._equipGfx.clear();
+
+      // ── Barra de fundo (cantos superiores arredondados, base colada na tela) ──
+      const cr = 12;  // raio dos cantos superiores
+      this._equipGfx.fillStyle(0x000000, 0.35);
+      // sombra
+      this._equipGfx.fillRect(bx + 2, by + 2, BW, BH);
+      // fundo escuro
+      this._equipGfx.fillStyle(0x0b1422, 0.92);
+      this._equipGfx.fillRect(bx, by, BW, BH);
+      // brilho topo
+      this._equipGfx.fillStyle(0x2a4060, 0.30);
+      this._equipGfx.fillRect(bx, by, BW, 14);
+      // borda — só os três lados superiores + cantos arredondados
+      this._equipGfx.lineStyle(2, 0x2a4a70, 0.75);
+      this._equipGfx.beginPath();
+      this._equipGfx.moveTo(bx, by + BH);
+      this._equipGfx.lineTo(bx, by + cr);
+      this._equipGfx.arc(bx + cr, by + cr, cr, Math.PI, Math.PI * 1.5);
+      this._equipGfx.lineTo(bx + BW - cr, by);
+      this._equipGfx.arc(bx + BW - cr, by + cr, cr, Math.PI * 1.5, 0);
+      this._equipGfx.lineTo(bx + BW, by + BH);
+      this._equipGfx.strokePath();
+
+      // ── Slot interno ──────────────────────────────────────────────────────
+      // sombra do slot
+      this._equipGfx.fillStyle(0x000000, 0.50);
+      this._equipGfx.fillRoundedRect(sx - 1, sy + 2, SW + 2, SH + 2, 10);
+      // fundo slot
+      this._equipGfx.fillStyle(0x0d1a28, 0.95);
+      this._equipGfx.fillRoundedRect(sx, sy, SW, SH, 10);
+      // brilho topo slot
+      this._equipGfx.fillStyle(0x1e3048, 0.45);
+      this._equipGfx.fillRoundedRect(sx, sy, SW, SH * 0.40, 10);
+      // borda slot
+      const borderCol = icon ? col : 0x2a3a50;
+      this._equipGfx.lineStyle(2, borderCol, icon ? 0.88 : 0.40);
+      this._equipGfx.strokeRoundedRect(sx, sy, SW, SH, 10);
+      // glow externo quando ativo
+      if (icon) {
+        this._equipGfx.lineStyle(5, col, 0.15);
+        this._equipGfx.strokeRoundedRect(sx - 3, sy - 3, SW + 6, SH + 6, 13);
+      }
+
+      if (icon) {
+        this._equipText.setText(icon)
+          .setPosition(W / 2, sy + SH / 2).setVisible(true);
+      } else {
+        this._equipText.setVisible(false);
+      }
     }
 
     shop.update(delta);
@@ -1170,6 +1330,7 @@ export class GameScene extends Phaser.Scene {
     // Mesa de ferramentas e bateria apenas no quadrante inicial
     this._workbenchGfx.setVisible(qx === 0);
     if (this._capsuleBatHud)  this._capsuleBatHud.setVisible(qx === 0);
+    if (this._capsuleOxyHud)  this._capsuleOxyHud.setVisible(qx === 0);
     if (this._capsuleLabel)   this._capsuleLabel.setVisible(qx === 0);
   }
 
@@ -1241,7 +1402,7 @@ export class GameScene extends Phaser.Scene {
       g.fillRect(0, caveTop, W, caveH);
 
       // Veias e manchas determinísticas: tons cinzentos variados
-      const rng = new Phaser.Math.RandomDataGenerator([`cave_${Math.floor(camY / 80)}`]);
+      const rng = new Phaser.Math.RandomDataGenerator(['cave_bg']);
       for (let i = 0; i < 28; i++) {
         const vx  = rng.between(0, W);
         const vy  = rng.between(caveTop, H);

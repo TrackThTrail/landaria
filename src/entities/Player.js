@@ -53,12 +53,15 @@ export class Player {
     this.maxFuel = 100;
     this.oxygen    = 100;
     this.maxOxygen = 100;
-    this.copper  = 10;
-    this.iron    = 10;  // Ferro no inventário
-    this.rkanium = 10;  // Rkanium no inventário
+    this.copper  = 0;
+    this.iron    = 0;  // Ferro no inventário
+    this.rkanium = 0;  // Rkanium no inventário
     this.stones  = 0;   // Pedras de Iluminação no inventário
-    this.hasRadar = false;  // Radar de Sonar
-    this.medkits = 1;   // Med-kits no inventário
+    this.hasRadar = true;  // Começa com Radar
+    this.medkits  = 1;   // Med-kits no inventário
+    this.lanterns = 1;   // Começa com Lanterna
+    this.lanternOn = false;  // Lanterna ligada
+    this.hasJetpack = true; // Começa com Jetpack
 
     // Efeito do med-kit
     this.medkitActive    = false;
@@ -321,7 +324,8 @@ export class Player {
     }
 
     // ── Escavadeira na mão (sempre que hasDrill) ──────────────────────
-    if (this.hasDrill) this._drawDrillHand(g, x, y, facing, armY, arm);
+    if (this.hasDrill)   this._drawDrillHand(g, x, y, facing, armY, arm);
+    if (this.lanternOn && this.lanterns > 0) this._drawLanternHand(g, x, y, facing, armY, arm);
 
     // ── Sombra lunar ──────────────────────────────────────────────────────
     g.fillStyle(0x000000, 0.18);
@@ -551,6 +555,30 @@ export class Player {
    * Escavadeira compacta na mão — aponta em qualquer direção (drillDirX, drillDirY).
    * Usa transformação de coordenadas local para desenhar no ângulo correto.
    */
+  _drawLanternHand(g, x, y, facing, armY, arm) {
+    // Posição na mão frontal (oposta à mochila)
+    const hx = x + facing * (arm.w * 0.5 + 6);
+    const hy = armY + arm.h * 0.70;
+
+    // Corpo da lanterna (cilindro simples)
+    const lw = 5, ll = 14;
+    g.fillStyle(0x555555, 1);
+    g.fillRoundedRect(hx - lw / 2, hy - ll / 2, lw, ll, 2);
+
+    // Cabeça da lanterna (frente)
+    const headX = hx + facing * (ll * 0.5 + 2);
+    g.fillStyle(0x888888, 1);
+    g.fillCircle(headX, hy, lw * 0.85);
+
+    // Lente brilhante
+    g.fillStyle(0xffee88, 0.95);
+    g.fillCircle(headX + facing * 1.5, hy, lw * 0.45);
+
+    // Halo de luz (glow amarelo semi-transparente)
+    g.fillStyle(0xffcc44, 0.18);
+    g.fillCircle(headX + facing * 3, hy, lw * 2.2);
+  }
+
   _drawDrillHand(g, x, y, facing, armY, arm) {
     const t    = this.drillTime;
     const spin = t * 0.018;
