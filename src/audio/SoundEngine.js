@@ -293,6 +293,77 @@ export class SoundEngine {
 
   resetWalk() { this._walkTimer = 0; }
 
+  /** Clique de plugue elétrico ao conectar o cabo — lento e grave. */
+  sfxPlug() {
+    if (!this._ctx) return;
+    const ctx = this._ctx;
+    const now = ctx.currentTime;
+
+    // Clunk grave metálico
+    const body     = ctx.createOscillator();
+    const bodyGain = ctx.createGain();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(90, now);
+    body.frequency.exponentialRampToValueAtTime(38, now + 0.28);
+    bodyGain.gain.setValueAtTime(0.30, now);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+    body.connect(bodyGain); bodyGain.connect(this._masterSfx);
+    body.start(now); body.stop(now + 0.34);
+
+    // Zumbido elétrico suave e breve
+    const buzz     = ctx.createOscillator();
+    const buzzGain = ctx.createGain();
+    buzz.type = 'sawtooth';
+    buzz.frequency.setValueAtTime(120, now + 0.10);
+    buzz.frequency.exponentialRampToValueAtTime(60, now + 0.40);
+    buzzGain.gain.setValueAtTime(0, now);
+    buzzGain.gain.setValueAtTime(0.10, now + 0.10);
+    buzzGain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+    buzz.connect(buzzGain); buzzGain.connect(this._masterSfx);
+    buzz.start(now); buzz.stop(now + 0.43);
+
+    // Tom descendente lento ("encaixe")
+    this._tone({ type: 'sine', freq: 260, endFreq: 130, dur: 0.38, vol: 0.10, attack: 0.03 });
+  }
+
+  /** Fabricar pedra de iluminação — dois cliques cristalinos. */
+  sfxCraftStone() {
+    if (!this._ctx) return;
+    const now = this._ctx.currentTime;
+    this._tone({ type: 'sine', freq: 780, endFreq: 1050, dur: 0.14, vol: 0.16, attack: 0.006 });
+    setTimeout(() => {
+      if (!this._ctx) return;
+      this._tone({ type: 'sine', freq: 1100, endFreq: 880, dur: 0.18, vol: 0.12, attack: 0.005 });
+    }, 140);
+    // Rkaníum brilhante
+    setTimeout(() => {
+      if (!this._ctx) return;
+      this._tone({ type: 'triangle', freq: 1400, endFreq: 1000, dur: 0.22, vol: 0.09, attack: 0.01 });
+    }, 240);
+  }
+
+  /** Fabricar radar de sonar — varredura electrónica. */
+  sfxCraftRadar() {
+    if (!this._ctx) return;
+    const ctx = this._ctx;
+    const now = ctx.currentTime;
+    // Tone sweep ascendente metálico
+    this._tone({ type: 'sine', freq: 180, endFreq: 540, dur: 0.30, vol: 0.14, attack: 0.01 });
+    // Ping final
+    setTimeout(() => {
+      if (!this._ctx) return;
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(1760, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+      osc.connect(gain); gain.connect(this._masterSfx);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.47);
+    }, 280);
+  }
+
   // ── Música ambiente ───────────────────────────────────────────────────────
 
   _startAmbient() {

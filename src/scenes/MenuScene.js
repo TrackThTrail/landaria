@@ -172,7 +172,7 @@ export class MenuScene extends Phaser.Scene {
     this._rulesGroup = [
       this._rulesBg = this.add.graphics().setDepth(30),
       this._rulesText = this.add.text(PX + 24, PY + 20,
-        'CONTROLOS\n' +
+        'CONTROLES\n' +
         '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +
         'A / D        Mover para esquerda / direita\n' +
         'Espa\u00e7o       Pular\n' +
@@ -180,7 +180,7 @@ export class MenuScene extends Phaser.Scene {
         '1            Abrir paraquedas\n' +
         'F            Equipar / guardar a escavadeira\n' +
         'L            Abrir mesa de ferramentas (perto dela)\n' +
-        'O            Colocar pedra de ilumina\u00e7\u00e3o\n' +
+        'E            Colocar pedra de ilumina\u00e7\u00e3o\n' +
         'Esc          Fechar menus\n\n' +
         'OBJETIVO\n' +
         '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +

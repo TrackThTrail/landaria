@@ -9,27 +9,107 @@ export class TerrainGrid {
    * @param {number} worldW    - largura do mundo
    * @param {number} cellSize  - tamanho de cada célula em px
    */
-  constructor(groundY, worldH, worldW, cellSize) {
+  constructor(groundY, worldH, worldW, cellSize, colSeedOffset = 0) {
     this.groundY  = groundY;
     this.cellSize = cellSize;
     this.cols     = Math.ceil(worldW  / cellSize);
     this.rows     = Math.ceil((worldH - groundY) / cellSize);
     // 0 = escavado, 1 = regolito, 2 = minério de cobre, 3 = rkanium
     this.cells = Array.from({ length: this.rows }, () => new Uint8Array(this.cols).fill(1));
+    // Células já vistas pelo jogador (0=ignorada, 1=explorada) — persiste entre sessões
+    this.explored = new Uint8Array(this.rows * this.cols);
 
     // Semeia veios de cobre a partir da 3ª fileira (razão 1/20)
     for (let row = 3; row < this.rows; row++) {
       for (let col = 0; col < this.cols; col++) {
-        const seed = (row * 31 + col * 17) & 0xffff;
+        const seed = (row * 31 + (col + colSeedOffset) * 17) & 0xffff;
         if (seed % 20 === 0) this.cells[row][col] = 2;
+      }
+    }
+
+    // Semeia ferro a partir da 5ª fileira (razão 1/28)
+    for (let row = 5; row < this.rows; row++) {
+      for (let col = 0; col < this.cols; col++) {
+        const seed = (row * 41 + (col + colSeedOffset) * 23) & 0xffff;
+        if (seed % 28 === 0) this.cells[row][col] = 4;
       }
     }
 
     // Semeia rkanium a partir da 8ª fileira (razão 1/35, mais raro)
     for (let row = 8; row < this.rows; row++) {
       for (let col = 0; col < this.cols; col++) {
-        const seed = (row * 53 + col * 29) & 0xffff;
+        const seed = (row * 53 + (col + colSeedOffset) * 29) & 0xffff;
         if (seed % 35 === 0) this.cells[row][col] = 3;
+      }
+    }
+
+    // ── Cavernas ──────────────────────────────────────────────────────────
+    // Escavadas DEPOIS dos minérios para sobrescrever corretamente com vazio.
+    this.caves = [];  // [{wx, wy, type}] em coords de mundo (chão da caverna)
+    const CDEFS = [
+      { n: 5, rxL: 1, rxH: 3, ryL: 1, ryH: 2, rMin:  3, rMax:  80, type: 'small'  },
+      { n: 3, rxL: 3, rxH: 5, ryL: 2, ryH: 3, rMin:  6, rMax: 160, type: 'medium' },
+      { n: 2, rxL: 5, rxH: 8, ryL: 3, ryH: 4, rMin: 12, rMax: 260, type: 'large'  },
+    ];
+    let ci = 0;
+    for (const d of CDEFS) {
+      for (let i = 0; i < d.n; i++, ci++) {
+        // LCG determinístico baseado no índice + offset do quadrante
+        const h1 = ((ci * 83  + colSeedOffset * 19 +  7) * 1664525 + 1013904223) >>> 0;
+        const h2 = ((ci * 127 + colSeedOffset * 37 + 13) * 1664525 + 1013904223) >>> 0;
+        const h3 = ((ci * 61  + colSeedOffset * 53 +  3) * 1664525 + 1013904223) >>> 0;
+        const h4 = ((ci * 97  + colSeedOffset * 71 + 11) * 1664525 + 1013904223) >>> 0;
+
+        const rx  = d.rxL + (h1 & 0xff) % (d.rxH - d.rxL + 1);
+        const ry  = d.ryL + (h2 & 0xff) % (d.ryH - d.ryL + 1);
+        const col = Math.max(rx + 1,
+                    Math.min(this.cols - rx - 2,
+                             (h3 & 0xffff) % Math.max(1, this.cols - 2 * rx - 2) + rx + 1));
+        const rMax = Math.min(d.rMax, this.rows - ry - 2);
+        if (rMax <= d.rMin) continue;
+        const row = d.rMin + (h4 & 0xffff) % (rMax - d.rMin);
+
+        // Esculpe elipse irregular com ruído leve
+        for (let dr = -ry; dr <= ry; dr++) {
+          for (let dc = -(rx + 1); dc <= rx + 1; dc++) {
+            const r = row + dr, c = col + dc;
+            if (r < 1 || r >= this.rows || c < 0 || c >= this.cols) continue;
+            const ns = ((c * 31 + r * 17 + ci * 7) & 0xfff) / 4095.0;
+            if ((dc * dc) / ((rx + 0.6) * (rx + 0.6))
+              + (dr * dr) / ((ry + 0.6) * (ry + 0.6)) <= 1.0 + ns * 0.25) {
+              this.cells[r][c] = 0;
+            }
+          }
+        }
+        this.caves.push({
+          wx:   col * cellSize + cellSize / 2,
+          wy:   groundY + (row + ry) * cellSize,  // chão da caverna
+          type: d.type,
+        });
+      }
+    }
+  }
+
+  /**
+   * Marca círculo de células como exploradas (usa coords de mundo).
+   * @param {number} wx   — X do jogador em coords mundo
+   * @param {number} wy   — Y dos pés do jogador em coords mundo
+   * @param {number} radius — raio em px (lightRadius do jogador)
+   */
+  markExplored(wx, wy, radius) {
+    const cs      = this.cellSize;
+    const cCol    = Math.floor(wx / cs);
+    const cRow    = Math.floor((wy - this.groundY) / cs);
+    const cRange  = Math.ceil(radius / cs) + 1;
+    const r2      = radius * radius;
+    for (let dr = -cRange; dr <= cRange; dr++) {
+      for (let dc = -cRange; dc <= cRange; dc++) {
+        const col = cCol + dc;
+        const row = cRow + dr;
+        if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) continue;
+        if ((dc * cs) * (dc * cs) + (dr * cs) * (dr * cs) <= r2) {
+          this.explored[row * this.cols + col] = 1;
+        }
       }
     }
   }
@@ -94,7 +174,22 @@ export class TerrainGrid {
         const wx = col * cs;
         const cellType = this.cells[row][col];
 
-        if (cellType === 3) {
+        if (cellType === 4) {
+          // ── Minério de ferro ──────────────────────────────────────────────
+          const seed = (row * 41 + col * 23) & 0xffff;
+          const rv = Math.round(80  * (1 - depthT) + 40 * depthT);
+          const gv = Math.round(70  * (1 - depthT) + 35 * depthT);
+          const bv = Math.round(65  * (1 - depthT) + 30 * depthT);
+          g.fillStyle((rv << 16) | (gv << 8) | bv, 1);
+          g.fillRect(wx, wy, cs - 1, cs - 1);
+          // veios metálicos cinza-prata
+          g.fillStyle(0xaaaaaa, 0.75);
+          g.fillRect(wx + 5  + (seed % 8),  wy + 8  + (seed % 7), 16, 3);
+          g.fillRect(wx + 10 + (seed % 6),  wy + 20 + (seed % 5), 10, 2);
+          g.fillStyle(0xcccccc, 0.45);
+          g.fillRect(wx + 7  + (seed % 10), wy + 14 + (seed % 6),  8, 2);
+          g.fillCircle(wx + 20 + (seed % 8), wy + 26 + (seed % 6), 2);
+        } else if (cellType === 3) {
           // ── Rkanium: cristais violeta/roxo profundo ─────────────────────────
           const seed = (row * 53 + col * 29) & 0xffff;
           g.fillStyle(0x1a0828, 1);
@@ -132,9 +227,9 @@ export class TerrainGrid {
           g.fillRect(wx, wy, cs - 1, cs - 1);
         }
 
-        // Pedriscos lunares (tons de cinza variados) — apenas regolito, não em cobre/rkanium
+        // Pedriscos lunares (tons de cinza variados) — apenas regolito, não em cobre/ferro/rkanium
         const seed = (row * 31 + col * 17) & 0xffff;
-        if (cellType === 2 || cellType === 3) continue;
+        if (cellType === 2 || cellType === 3 || cellType === 4) continue;
         if (seed % 7 === 0) {
           g.fillStyle(0x9a9890, 0.60);
           g.fillCircle(wx + 8 + (seed % 18), wy + cs * 0.40 + (seed % 8), 3 + (seed % 3));

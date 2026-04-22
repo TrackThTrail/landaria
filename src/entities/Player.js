@@ -39,7 +39,7 @@ export class Player {
     this.isAttacking = false;
     this.attackTimer = 0;
     this.ATTACK_DUR  = 280;
-    this.ATTACK_PUSH = 3.5;
+    this.ATTACK_PUSH = 1.8;
 
     // Stats
     this.name    = 'Lander';
@@ -51,9 +51,20 @@ export class Player {
     this.gold    = 50;
     this.fuel    = 100;
     this.maxFuel = 100;
-    this.copper  = 0;
-    this.rkanium = 0;   // Rkanium no inventário
+    this.oxygen    = 100;
+    this.maxOxygen = 100;
+    this.copper  = 10;
+    this.iron    = 10;  // Ferro no inventário
+    this.rkanium = 10;  // Rkanium no inventário
     this.stones  = 0;   // Pedras de Iluminação no inventário
+    this.hasRadar = false;  // Radar de Sonar
+    this.medkits = 1;   // Med-kits no inventário
+
+    // Efeito do med-kit
+    this.medkitActive    = false;
+    this.medkitTimer     = 0;   // tempo restante do efeito (ms)
+    this.medkitTickTimer = 0;   // temporizador entre ticks de cura
+    this.medkitTick      = false; // true por 1 frame quando um tick de cura dispara
 
     // Jetpack
     this.jetpackOn       = false;
@@ -122,6 +133,21 @@ export class Player {
         e.tickTimer += e.tickInterval;
         e.remainingTicks--;
         if (e.type === 'health_potion') this.hp = Math.min(this.maxHp, this.hp + 2);
+      }
+    }
+
+    // ── Med-kit ───────────────────────────────────────────────────────────
+    this.medkitTick = false;
+    if (this.medkitActive) {
+      this.medkitTimer     -= delta;
+      this.medkitTickTimer -= delta;
+      if (this.medkitTickTimer <= 0) {
+        this.medkitTickTimer += 1000;
+        this.hp = Math.min(this.maxHp, this.hp + 5);
+        this.medkitTick = true;
+      }
+      if (this.medkitTimer <= 0) {
+        this.medkitActive = false;
       }
     }
 
@@ -402,10 +428,11 @@ export class Player {
       y: y + (px - x) * sa + (py - y) * ca,
     });
 
-    const bw    = this.baseW * 0.72;   // mesma largura do tronco frontal normal
-    const bh    = this.baseH;
-    const headR = this.baseW * 0.37;   // mesmo raio do capacete normal
-    const legW  = this.baseW * 0.28;   // mesma largura das pernas normais
+    const squat = this.wakeAnim;  // 1=deitado, 0=de pé
+    const bw    = this.baseW * (0.72 + squat * 0.55);  // mais largo ao deitar
+    const bh    = this.baseH * (1 - squat * 0.28);     // mais baixo/achatado ao deitar
+    const headR = this.baseW * 0.37;
+    const legW  = this.baseW * (0.28 + squat * 0.14);  // pernas também mais largas
 
     // Sombra no chão
     g.fillStyle(0x000000, 0.16);
@@ -678,8 +705,17 @@ export class Player {
     const barH = 6;
     const barX = x - barW / 2;
 
-    const manaY = headTop - 22;
-    const hpY   = manaY - barH - 3;
+    const manaY  = headTop - 22;
+    const hpY    = manaY - barH - 3;
+    const oxyY   = hpY  - barH - 3;
+
+    // Barra de oxigênio
+    const oxyPct = this.oxygen / this.maxOxygen;
+    const oxyColor = oxyPct > 0.5 ? 0x22aaff : oxyPct > 0.25 ? 0xff8800 : 0xff2222;
+    g.fillStyle(0x0a1020, 0.75);
+    g.fillRoundedRect(barX - 1, oxyY - 1, barW + 2, barH + 2, 2);
+    g.fillStyle(oxyColor, 1);
+    g.fillRoundedRect(barX, oxyY, barW * oxyPct, barH, 2);
 
     g.fillStyle(0x1a0a0a, 0.75);
     g.fillRoundedRect(barX - 1, hpY - 1, barW + 2, barH + 2, 2);
@@ -707,7 +743,18 @@ export class Player {
       g.fillRect(iconX - 0.5, iconY + 2, 1, 5);
     }
 
-    nameText.setPosition(x, headTop - 36).setText(this.name).setFontSize(10);
-    levelText.setPosition(x, headTop - 48).setText(`Lv.${this.level}`).setFontSize(10);
+    // Ícone de med-kit — visível enquanto efeito activo
+    if (this.medkitActive) {
+      const ix = barX + barW + 8;
+      const iy = manaY + barH / 2;
+      g.fillStyle(0x330000, 0.75);
+      g.fillRect(ix - 7, iy - 7, 14, 14);
+      g.fillStyle(0xff3333, 1);
+      g.fillRect(ix - 5, iy - 1.5, 10, 3);
+      g.fillRect(ix - 1.5, iy - 5, 3, 10);
+    }
+
+    nameText.setPosition(x, headTop - 54).setText(this.name).setFontSize(10);
+    levelText.setPosition(x, headTop - 66).setText(`Lv.${this.level}`).setFontSize(10);
   }
 }
