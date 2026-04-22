@@ -173,23 +173,26 @@ export class MenuScene extends Phaser.Scene {
       this._rulesBg = this.add.graphics().setDepth(30),
       this._rulesText = this.add.text(PX + 24, PY + 20,
         'CONTROLES\n' +
-        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +
+        '──────────────────────────────────────────────\n' +
         'A / D        Mover para esquerda / direita\n' +
-        'Espa\u00e7o       Pular\n' +
-        'Espa\u00e7o (ar)  Soltar e pressionar de novo: jetpack\n' +
+        'Espaço       Pular\n' +
+        'Espaço (ar)  Soltar e pressionar de novo: jetpack\n' +
         '1            Abrir paraquedas\n' +
         'F            Equipar / guardar a escavadeira\n' +
         'L            Abrir mesa de ferramentas (perto dela)\n' +
-        'E            Colocar pedra de ilumina\u00e7\u00e3o\n' +
+        'T            Equipar / guardar a lanterna\n' +
+        'E            Lançar pedra de iluminação\n' +
+        'M            Abrir mapa\n' +
+        'J            Abrir diário de bordo\n' +
         'Esc          Fechar menus\n\n' +
         'OBJETIVO\n' +
-        '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n' +
-        'Cava \u2192 encontra cobre \u2192 compra pedras na mesa\n' +
-        'Usa o jetpack (bateria) para explorar.\n' +
-        'Coloca pedras no ch\u00e3o para iluminar o subsolo.',
+        '──────────────────────────────────────────────\n' +
+        'Você é um tripulante da nave Raakar e uma falha nos transmissores de energia causou uma explosão e você conseguiu se salvar com a cápsula de emergência.\n' +
+        'Agora em um planeta estranho e aparentemente inabitável, precisa sobreviver e encontrar uma maneira de voltar pra casa.',
         {
           fontFamily: 'monospace', fontSize: '13px', color: '#ddeeff',
           stroke: '#000', strokeThickness: 2, lineSpacing: 4,
+          wordWrap: { width: PW - 64 },
         }).setDepth(31),
       this._rulesClose = this.add.text(PX + PW - 14, PY + 12, '\u2715', {
         fontFamily: 'monospace', fontSize: '18px', color: '#ff6666',
@@ -200,6 +203,25 @@ export class MenuScene extends Phaser.Scene {
         .on('pointerout',  () => this._rulesClose.setColor('#ff6666'))
         .on('pointerdown', () => this._closeRules()),
     ];
+    // Scroll manual no texto, com máscara de recorte
+    this._rulesText.setInteractive();
+    // Máscara de recorte
+    const maskShape = this.add.graphics().setVisible(false);
+    maskShape.fillStyle(0xffffff);
+    maskShape.fillRect(PX + 20, PY + 16, PW - 56, PH - 44);
+    const mask = maskShape.createGeometryMask();
+    this._rulesText.setMask(mask);
+
+    this._rulesText.on('wheel', (pointer, dx, dy, dz, event) => {
+      // Limites de scroll
+      const minY = PY + 20 + Math.min(0, PH - 44 - this._rulesText.height);
+      const maxY = PY + 20;
+      let newY = this._rulesText.y - dy * 0.5;
+      if (newY < minY) newY = minY;
+      if (newY > maxY) newY = maxY;
+      this._rulesText.y = newY;
+      event.stopPropagation();
+    });
 
     this._rulesBg.fillStyle(0x020d1a, 0.96);
     this._rulesBg.fillRoundedRect(PX, PY, PW, PH, 12);

@@ -57,11 +57,11 @@ export class Player {
     this.iron    = 0;  // Ferro no inventário
     this.rkanium = 0;  // Rkanium no inventário
     this.stones  = 0;   // Pedras de Iluminação no inventário
-    this.hasRadar = true;  // Começa com Radar
+    this.hasRadar = false;  // Começa sem Radar
     this.medkits  = 1;   // Med-kits no inventário
-    this.lanterns = 1;   // Começa com Lanterna
+    this.lanterns = 0;   // Começa sem Lanterna
     this.lanternOn = false;  // Lanterna ligada
-    this.hasJetpack = true; // Começa com Jetpack
+    this.hasJetpack = false; // Começa sem Jetpack
 
     // Efeito do med-kit
     this.medkitActive    = false;

@@ -37,8 +37,8 @@ export class Shop {
                          { ...ts, fontSize: '14px', color: '#88ddff' }).setDepth(21).setScrollFactor(0);
     this._item2Desc  = scene.add.text(PX + 20, PY + 198, 'Emite sonar que detecta minérios [R]',
                          { ...ts, fontSize: '11px', color: '#bbbbbb' }).setDepth(21).setScrollFactor(0);
-    this._item2Price = scene.add.text(PX + 20, PY + 214, '🔩 1 ferro',
-                         { ...ts, fontSize: '12px', color: '#aaaaaa' }).setDepth(21).setScrollFactor(0);
+    this._item2Price = scene.add.text(PX + 20, PY + 214, '🟠 1 cobre  🔩 1 ferro',
+               { ...ts, fontSize: '12px', color: '#aaaaaa' }).setDepth(21).setScrollFactor(0);
     this._buyBtn2    = scene.add.text(PX + PW - 20, PY + 196, '[ Fabricar ]',
                          { ...ts, fontSize: '13px', color: '#88ff88' })
                          .setOrigin(1, 0).setInteractive({ useHandCursor: true }).setDepth(21).setScrollFactor(0);
@@ -48,7 +48,7 @@ export class Shop {
                { ...ts, fontSize: '14px', color: '#ffdd88' }).setDepth(21).setScrollFactor(0);
     this._item3Desc  = scene.add.text(PX + 20, PY + 278, 'Ilumina em cone à frente [T]',
                { ...ts, fontSize: '11px', color: '#bbbbbb' }).setDepth(21).setScrollFactor(0);
-    this._item3Price = scene.add.text(PX + 20, PY + 294, '🟠 1 cobre',
+    this._item3Price = scene.add.text(PX + 20, PY + 294, '🔩 2 ferros',
                { ...ts, fontSize: '12px', color: '#e8a060' }).setDepth(21).setScrollFactor(0);
     this._buyBtn3    = scene.add.text(PX + PW - 20, PY + 276, '[ Fabricar ]',
                { ...ts, fontSize: '13px', color: '#88ff88' })
@@ -59,7 +59,7 @@ export class Shop {
                { ...ts, fontSize: '14px', color: '#ffbb44' }).setDepth(21).setScrollFactor(0);
     this._item4Desc  = scene.add.text(PX + 20, PY + 358, 'Permite voar [Espaço]',
                { ...ts, fontSize: '11px', color: '#bbbbbb' }).setDepth(21).setScrollFactor(0);
-    this._item4Price = scene.add.text(PX + 20, PY + 374, '🟠 1 cobre',
+    this._item4Price = scene.add.text(PX + 20, PY + 374, '🔩 1 ferro  🔮 1 rkanium',
                { ...ts, fontSize: '12px', color: '#e8a060' }).setDepth(21).setScrollFactor(0);
     this._buyBtn4    = scene.add.text(PX + PW - 20, PY + 356, '[ Fabricar ]',
                { ...ts, fontSize: '13px', color: '#88ff88' })
@@ -154,13 +154,13 @@ export class Shop {
 
   _onBuyLantern() {
     if (!this._player) return;
-    if (this._player.copper >= 1) {
-      this._player.copper   -= 1;
+    if (this._player.iron >= 2) {
+      this._player.iron    -= 2;
       this._player.lanterns += 1;
       if (this._snd) this._snd.sfxCraftStone();
       this._feedback.setText('Lanterna obtida! [T] para usar').setColor('#ffdd88');
     } else {
-      this._feedback.setText('Cobre insuficiente!').setColor('#ff6666');
+      this._feedback.setText('Ferro insuficiente!').setColor('#ff6666');
     }
     this._feedbackTimer = 2200;
   }
@@ -169,11 +169,14 @@ export class Shop {
     if (!this._player) return;
     if (this._player.hasRadar) {
       this._feedback.setText('Radar já obtido! [R] para usar').setColor('#88ddff');
-    } else if (this._player.iron >= 1) {
+    } else if (this._player.copper >= 1 && this._player.iron >= 1) {
+      this._player.copper  -= 1;
       this._player.iron    -= 1;
       this._player.hasRadar = true;
       if (this._snd) this._snd.sfxCraftRadar();
       this._feedback.setText('Radar obtido! [R] para usar').setColor('#88ddff');
+    } else if (this._player.copper < 1) {
+      this._feedback.setText('Cobre insuficiente!').setColor('#ff6666');
     } else {
       this._feedback.setText('Ferro insuficiente!').setColor('#ff6666');
     }
@@ -184,13 +187,16 @@ export class Shop {
     if (!this._player) return;
     if (this._player.hasJetpack) {
       this._feedback.setText('Jetpack já obtido! [Espaço] para usar').setColor('#ffbb44');
-    } else if (this._player.copper >= 1) {
-      this._player.copper   -= 1;
+    } else if (this._player.iron >= 1 && this._player.rkanium >= 1) {
+      this._player.iron     -= 1;
+      this._player.rkanium  -= 1;
       this._player.hasJetpack = true;
       if (this._snd) this._snd.sfxCraftRadar();
       this._feedback.setText('Jetpack obtido! [Espaço] para usar').setColor('#ffbb44');
+    } else if (this._player.iron < 1) {
+      this._feedback.setText('Ferro insuficiente!').setColor('#ff6666');
     } else {
-      this._feedback.setText('Cobre insuficiente!').setColor('#ff6666');
+      this._feedback.setText('Rkanium insuficiente!').setColor('#ff6666');
     }
     this._feedbackTimer = 2200;
   }
