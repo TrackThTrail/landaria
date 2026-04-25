@@ -4,6 +4,8 @@ import { Alien }  from '../entities/Alien.js';
 import { Shop }        from '../ui/Shop.js';
 import { Inventory }   from '../ui/Inventory.js';
 import { MissionLog }  from '../ui/MissionLog.js';
+import { CharacterMenu } from '../ui/CharacterMenu.js';
+import { SkillTreeMenu } from '../ui/SkillTreeMenu.js';
 import { MapView }     from '../ui/MapView.js';
 import { TerrainGrid } from '../terrain/TerrainGrid.js';
 
@@ -63,6 +65,14 @@ export class GameScene extends Phaser.Scene {
     // ── Relatório da Missão ───────────────────────────────────────────────
     this.missionLog = new MissionLog(this);
 
+    // ── Menu de personagem ────────────────────────────────────────────────
+    this.characterMenu = new CharacterMenu(this);
+    this.characterMenu.setPlayer(this.player);
+
+    // ── Árvore de habilidades ─────────────────────────────────────────────
+    this.skillTreeMenu = new SkillTreeMenu(this);
+    this.skillTreeMenu.setPlayer(this.player);
+
     // ── Input ──────────────────────────────────────────────────────────────
     this._cursors  = this.input.keyboard.createCursorKeys();
     this._wasd     = this.input.keyboard.addKeys({
@@ -84,6 +94,8 @@ export class GameScene extends Phaser.Scene {
     this._iKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I);
     this._jKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.J);
     this._mKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.M);
+    this._pKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+    this._yKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Y);
     this._qKey         = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
     this._tJustDown    = false;
     this.input.keyboard.on('keydown-T', () => { this._tJustDown = true; });
@@ -139,26 +151,35 @@ export class GameScene extends Phaser.Scene {
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
-    // HUD cobre — terceira linha, canto superior esquerdo
-    this._copperHud = this.add.text(12, 56, '', {
+    // HUD vida — terceira linha, canto superior esquerdo
+    this._hpHud = this.add.text(12, 56, '', {
+      fontFamily: 'monospace', fontSize: '13px', color: '#ff3333',
+      stroke: '#000', strokeThickness: 3,
+    }).setDepth(10).setScrollFactor(0);
+
+    // Barras no HUD (ao lado de O2, combustível e vida)
+    this._statusHudGfx = this.add.graphics().setDepth(10).setScrollFactor(0);
+
+    // HUD cobre — quarta linha, canto superior esquerdo
+    this._copperHud = this.add.text(12, 78, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#e8a060',
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
-    // HUD ferro — quarta linha
-    this._ironHud = this.add.text(12, 78, '', {
+    // HUD ferro — quinta linha
+    this._ironHud = this.add.text(12, 100, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#aaaaaa',
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
-    // HUD rkanium — quinta linha
-    this._rkaniumHud = this.add.text(12, 100, '', {
+    // HUD rkanium — sexta linha
+    this._rkaniumHud = this.add.text(12, 122, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#cc66ff',
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
 
-    // HUD pedras de iluminação — sexta linha, canto superior esquerdo
-    this._stoneHud = this.add.text(12, 122, '', {
+    // HUD pedras de iluminação — sétima linha, canto superior esquerdo
+    this._stoneHud = this.add.text(12, 144, '', {
       fontFamily: 'monospace', fontSize: '13px', color: '#ffe066',
       stroke: '#000', strokeThickness: 3,
     }).setDepth(10).setScrollFactor(0);
@@ -281,9 +302,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    const shopOpen = shop.visible || this.inventory.visible || this.missionLog.visible || this.mapView.visible;
+    const shopOpen = shop.visible || this.inventory.visible || this.missionLog.visible || this.mapView.visible || this.characterMenu.visible || this.skillTreeMenu.visible;
     // Movimento bloqueado apenas por painéis que precisam de foco total (não o mapa)
-    const blockMove = shop.visible || this.inventory.visible || this.missionLog.visible;
+    const blockMove = shop.visible || this.inventory.visible || this.missionLog.visible || this.characterMenu.visible || this.skillTreeMenu.visible;
 
     const spaceJustDown = !blockMove && Phaser.Input.Keyboard.JustDown(this._spaceKey);
     const spaceIsDown   = !blockMove && this._spaceKey.isDown;
@@ -411,7 +432,8 @@ export class GameScene extends Phaser.Scene {
       // paraquedas limita vy ≤ 2, por isso naturalmente abaixo do threshold
       const fallVy = player._landingVy || 0;
       if (fallVy > 4.5) {
-        const dmg = Math.round((fallVy - 4.5) * 18);
+        const rawDmg = Math.round((fallVy - 4.5) * 18);
+        const dmg = Math.max(1, rawDmg - Math.floor(player.suitResistance * 0.4));
         player.hp = Math.max(0, player.hp - dmg);
         this._spawnFloatText(player.x, player.y - player.baseH, `-${dmg} HP`, '#ff4444');
         this._snd.sfxFallDamage();
@@ -511,19 +533,28 @@ export class GameScene extends Phaser.Scene {
               for (const al of this._aliens) {
                 if (al.state === 'dead') continue;
                 if (Math.abs(al.x - bx) < CELL_SIZE * 1.4 && Math.abs(al.y - (by + CELL_SIZE / 2)) < CELL_SIZE) {
-                  if (al.takeDamage(35))
+                  const wasHp = al.hp;
+                  if (al.takeDamage(35)) {
                     this._spawnFloatText(al.x, al.y - al.baseH, '-35', '#ffaa00');
+                    if (wasHp > 0 && al.hp <= 0) player.gainXp(35);
+                  }
                 }
               }
               if (dug === 3) {
                 this._snd.sfxDigImpactCopper();
                 player.rkanium++;
+                const xpGain = 30;
+                player.gainXp(xpGain);
                 this._spawnFloatText(bx, by, '+1 Rkanium', '#cc66ff');
+                this._spawnFloatText(bx, by - 14, `+${xpGain} XP`, '#8aa0ff');
                 player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 2);
               } else if (dug === 4) {
                 this._snd.sfxDigImpactCopper();
                 player.iron++;
+                const xpGain = 20;
+                player.gainXp(xpGain);
                 this._spawnFloatText(bx, by, '+1 Ferro', '#aaaaaa');
+                this._spawnFloatText(bx, by - 14, `+${xpGain} XP`, '#8aa0ff');
                 player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 1);
                 // Remove sonar ping se existir nesta célula
                 const pingWX = bx;
@@ -533,7 +564,10 @@ export class GameScene extends Phaser.Scene {
               } else if (dug === 2) {
                 this._snd.sfxDigImpactCopper();
                 player.copper++;
+                const xpGain = 12;
+                player.gainXp(xpGain);
                 this._spawnFloatText(bx, by, '+1 Cobre', '#e8a060');
+                this._spawnFloatText(bx, by - 14, `+${xpGain} XP`, '#8aa0ff');
                 player.lightRadius = Math.min(player.MAX_LIGHT_R, player.lightRadius + 6);
                 // Remove sonar ping se existir nesta célula
                 const pingWX = bx;
@@ -578,8 +612,9 @@ export class GameScene extends Phaser.Scene {
         al.update(delta, player.x, player.y);
         al.resolveCollision(this._terrain, GROUND_Y, CELL_SIZE);
         if (al.hitPlayer && !this._gameOverActive) {
-          player.hp = Math.max(0, player.hp - al.DAMAGE);
-          this._spawnFloatText(player.x, player.y - player.baseH, `-${al.DAMAGE} HP`, '#ff2222');
+          const finalDmg = Math.max(1, al.DAMAGE - Math.floor(player.suitResistance * 0.5));
+          player.hp = Math.max(0, player.hp - finalDmg);
+          this._spawnFloatText(player.x, player.y - player.baseH, `-${finalDmg} HP`, '#ff2222');
           this._snd.sfxFallDamage();
           // Knocback no jogador
           player.vx = Math.sign(player.x - al.x) * 5;
@@ -600,8 +635,11 @@ export class GameScene extends Phaser.Scene {
           if (al.state === 'dead') continue;
           const adx = al.x - player.x;
           if (Math.abs(adx) < atkRange && Math.sign(adx) === player.facing) {
-            if (al.takeDamage(25))
+            const wasHp = al.hp;
+            if (al.takeDamage(25)) {
               this._spawnFloatText(al.x, al.y - al.baseH, '-25', '#ffaa00');
+              if (wasHp > 0 && al.hp <= 0) player.gainXp(35);
+            }
           }
         }
       }
@@ -715,13 +753,33 @@ export class GameScene extends Phaser.Scene {
           ctx.fill();
           ctx.restore();
 
-          // ── 6. Cone da lanterna (dentro do bloco underground) ─────────────
+          // ── 6. Cone da lanterna — ray-casting, bloqueia em células sólidas ──
           if (player.lanternOn && player.lanterns > 0) {
             ctx.save();
             ctx.globalCompositeOperation = 'destination-out';
             const coneLen   = 240;
             const halfAng   = Math.PI / 6;  // ±30°
             const centerAng = player.facing === 1 ? 0 : Math.PI;
+            const numRays   = 60;
+            // posição do jogador em coords de mundo (sem offset de câmera)
+            const pwx  = player.x;
+            const pwy  = sy + camY;  // = player.y - player.baseH * 0.5
+            const step = this._terrain.cellSize / 2;  // passo = metade da célula
+            // lança raios e encontra o ponto onde cada um bate num bloco
+            const pts = [];
+            for (let i = 0; i <= numRays; i++) {
+              const ang = (centerAng - halfAng) + (i / numRays) * halfAng * 2;
+              const dx  = Math.cos(ang);
+              const dy  = Math.sin(ang);
+              let dist  = coneLen;
+              for (let t = step; t <= coneLen; t += step) {
+                const col = Math.floor((pwx + dx * t) / this._terrain.cellSize);
+                const row = Math.floor((pwy + dy * t - this._terrain.groundY) / this._terrain.cellSize);
+                if (this._terrain.isSolid(col, row)) { dist = Math.max(0, t - step); break; }
+              }
+              pts.push({ ang, dist });
+            }
+            // preenche o polígono do cone com gradiente de luz
             const grdC = ctx.createRadialGradient(sx, sy, 0, sx, sy, coneLen);
             grdC.addColorStop(0,    'rgba(0,0,0,1)');
             grdC.addColorStop(0.65, 'rgba(0,0,0,0.92)');
@@ -730,7 +788,9 @@ export class GameScene extends Phaser.Scene {
             ctx.fillStyle = grdC;
             ctx.beginPath();
             ctx.moveTo(sx, sy);
-            ctx.arc(sx, sy, coneLen, centerAng - halfAng, centerAng + halfAng);
+            for (const { ang, dist } of pts) {
+              ctx.lineTo(sx + Math.cos(ang) * dist, sy + Math.sin(ang) * dist);
+            }
             ctx.closePath();
             ctx.fill();
             ctx.restore();
@@ -793,16 +853,82 @@ export class GameScene extends Phaser.Scene {
       const secsLeft = Math.ceil((player.oxygen / 100) * 90);
       const m = Math.floor(secsLeft / 60);
       const s = secsLeft % 60;
-      const oxyLabel = m > 0 ? `O2 ${m}m ${s < 10 ? '0' : ''}${s}s` : `O2 ${s}s`;
+      const oxyLabel = m > 0 ? `Oxygen ${m}m ${s < 10 ? '0' : ''}${s}s` : `O2 ${s}s`;
       const oxyColor = oxyPct > 0.5 ? '#22aaff' : oxyPct > 0.25 ? '#ff8800' : '#ff2222';
       this._oxyHudMain.setText(oxyLabel).setColor(oxyColor);
+
+      const fuelPct = player.fuel / player.maxFuel;
+      this._statusHudGfx.clear();
+
+      const barX = 122;
+      const barW = 92;
+      const barH = 8;
+
+      // O2
+      this._statusHudGfx.fillStyle(0x0a1020, 0.85);
+      this._statusHudGfx.fillRoundedRect(barX - 1, 15 - 1, barW + 2, barH + 2, 2);
+      this._statusHudGfx.fillStyle(oxyPct > 0.5 ? 0x22aaff : oxyPct > 0.25 ? 0xff8800 : 0xff2222, 1);
+      this._statusHudGfx.fillRoundedRect(barX, 15, barW * oxyPct, barH, 2);
+
+      // Bateria/combustível: uma barra só, com divisões visuais a cada 100 de capacidade
+      // Começa em 100, aumenta 50 a cada upgrade. Mesma largura total sempre.
+      const segmentSize = 100; // cada segmento visual = 100 de capacidade
+      const fullSegments = Math.floor(player.maxFuel / segmentSize);
+      const remainder = player.maxFuel % segmentSize;
+      const totalSegments = fullSegments + (remainder > 0 ? 1 : 0);
+      
+      const segmentW = barW / totalSegments;
+      const fuelColor = fuelPct > 0.5 ? 0x88ff88 : fuelPct > 0.25 ? 0xffbb44 : 0xff6644;
+      const fuelY = 37;
+
+      // Fundo geral
+      this._statusHudGfx.fillStyle(0x0a0a1a, 0.85);
+      this._statusHudGfx.fillRoundedRect(barX - 1, fuelY - 1, barW + 2, barH + 2, 2);
+
+      // Desenha cada segmento
+      let segX = barX;
+      for (let i = 0; i < totalSegments; i++) {
+        // Desenha background do segmento
+        this._statusHudGfx.fillStyle(0x111827, 0.95);
+        this._statusHudGfx.fillRect(segX, fuelY, segmentW, barH);
+
+        // Calcula quanto esse segmento deve preencher
+        const segStart = (i * segmentSize) / player.maxFuel;
+        const segEnd = Math.min((i + 1) * segmentSize, player.maxFuel) / player.maxFuel;
+        const fillNorm = Phaser.Math.Clamp((fuelPct - segStart) / (segEnd - segStart), 0, 1);
+
+        // Preenche o segmento
+        if (fillNorm > 0) {
+          this._statusHudGfx.fillStyle(fuelColor, 1);
+          this._statusHudGfx.fillRect(segX, fuelY, segmentW * fillNorm, barH);
+        }
+
+        segX += segmentW;
+      }
+
+      // Desenha divisões a cada 100 de capacidade (na posição correta da barra)
+      this._statusHudGfx.lineStyle(1, 0x333344, 0.8);
+      for (let cap = segmentSize; cap < player.maxFuel; cap += segmentSize) {
+        const divX = barX + (barW * cap / player.maxFuel);
+        this._statusHudGfx.strokeLineShape(new Phaser.Geom.Line(divX, fuelY, divX, fuelY + barH));
+      }
+
+      // Barra de vida
+      const hpPct = player.hp / player.maxHp;
+      const hpY = 59;
+      this._statusHudGfx.fillStyle(0x0a1020, 0.85);
+      this._statusHudGfx.fillRoundedRect(barX - 1, hpY - 1, barW + 2, barH + 2, 2);
+      this._statusHudGfx.fillStyle(0xff3333, 1);
+      this._statusHudGfx.fillRoundedRect(barX, hpY, barW * hpPct, barH, 2);
     }
-    const fp = Math.ceil(player.fuel);
+    const fp = Math.ceil((player.fuel / player.maxFuel) * 100);
     this._fuelHud.setText(`⛽ ${fp}%`).setColor(fp > 30 ? '#88ff88' : '#ff6644');
-    this._copperHud.setText(`🟠 ${player.copper} Cu`);
-    this._ironHud.setText(`🔩 ${player.iron} Fe`);
-    this._rkaniumHud.setText(`🔮 ${player.rkanium} Rk`);
-    this._stoneHud.setText(player.stones > 0 ? `💡 ${player.stones}x [E]` : '');
+    
+    this._hpHud.setText(`❤ ${Math.floor(player.hp)} / ${player.maxHp}`).setColor('#ff3333');
+    // this._copperHud.setText(`🟠 ${player.copper} Cu`);
+    // this._ironHud.setText(`🔩 ${player.iron} Fe`);
+    // this._rkaniumHud.setText(`🔮 ${player.rkanium} Rk`);
+    // this._stoneHud.setText(player.stones > 0 ? `💡 ${player.stones}x [E]` : '');
 
     // ── Float texts (animação +1) ─────────────────────────────────────────
     for (let i = this._floatTexts.length - 1; i >= 0; i--) {
@@ -1167,16 +1293,24 @@ export class GameScene extends Phaser.Scene {
     this._tJustDown = false;
 
     // Inventário [I]
-    if (Phaser.Input.Keyboard.JustDown(this._iKey) && !shop.visible && !this.missionLog.visible && !this.mapView.visible) {
+    if (Phaser.Input.Keyboard.JustDown(this._iKey) && !shop.visible && !this.missionLog.visible && !this.mapView.visible && !this.characterMenu.visible && !this.skillTreeMenu.visible) {
       this.inventory.toggle();
     }
     // Relatório da missão [J]
-    if (Phaser.Input.Keyboard.JustDown(this._jKey) && !shop.visible && !this.inventory.visible && !this.mapView.visible) {
+    if (Phaser.Input.Keyboard.JustDown(this._jKey) && !shop.visible && !this.inventory.visible && !this.mapView.visible && !this.characterMenu.visible && !this.skillTreeMenu.visible) {
       this.missionLog.toggle();
     }
     // Mapa [M]
-    if (Phaser.Input.Keyboard.JustDown(this._mKey) && !shop.visible && !this.inventory.visible && !this.missionLog.visible) {
+    if (Phaser.Input.Keyboard.JustDown(this._mKey) && !shop.visible && !this.inventory.visible && !this.missionLog.visible && !this.characterMenu.visible && !this.skillTreeMenu.visible) {
       this.mapView.toggle();
+    }
+    // Personagem [P]
+    if (Phaser.Input.Keyboard.JustDown(this._pKey) && !shop.visible && !this.inventory.visible && !this.missionLog.visible && !this.mapView.visible && !this.skillTreeMenu.visible) {
+      this.characterMenu.toggle();
+    }
+    // Habilidades [Y]
+    if (Phaser.Input.Keyboard.JustDown(this._yKey) && !shop.visible && !this.inventory.visible && !this.missionLog.visible && !this.mapView.visible && !this.characterMenu.visible) {
+      this.skillTreeMenu.toggle();
     }
     if (Phaser.Input.Keyboard.JustDown(this._escKey)) {
       if (shop.visible) this._snd.sfxShopClose();
@@ -1184,6 +1318,8 @@ export class GameScene extends Phaser.Scene {
       this.inventory.close();
       this.missionLog.close();
       this.mapView.close();
+      this.characterMenu.close();
+      this.skillTreeMenu.close();
     }
 
     // ── Slot de equipamento ativo (rodapé) ──────────────────────────────────────────
@@ -1256,6 +1392,8 @@ export class GameScene extends Phaser.Scene {
     this.inventory.update();
     this.missionLog.update();
     this.mapView.update();
+    this.characterMenu.update();
+    this.skillTreeMenu.update();
   }
 
   // ── Fundo do céu (fixo na tela) ────────────────────────────────────────────

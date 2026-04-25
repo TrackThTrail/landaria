@@ -17,7 +17,7 @@ const MISSION_ENTRIES = [
       'pode demorar semanas — ou nunca chegar.',
   },
   {
-    date: 'Dia 0 — Situação actual',
+    date: 'Dia 0 — Situação atual',
     text:
       'Você acordou sozinho junto aos destroços da cápsula numa planície ' +
       'de regolito cinzento. O ar exterior é irrespirável. As reservas de ' +

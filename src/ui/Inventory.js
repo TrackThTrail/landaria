@@ -11,7 +11,7 @@ const DEFS = {
   medkits:  { icon: '🩺', label: 'Med-kit [Q]',  color: '#ff6666' },
   hasRadar:   { icon: '📡', label: 'Radar [R]',    color: '#88ddff', equip: true },
   lanterns:   { icon: '🔦', label: 'Lanterna [T]', color: '#ffdd88', equip: true },
-  hasJetpack: { icon: '🚀', label: 'Jetpack [Espaço]', color: '#ffbb44', equip: true },
+  hasJetpack: { icon: '🚀', label: 'Jetpack\n[Espaço]', color: '#ffbb44', equip: true },
 };
 
 export class Inventory {
@@ -54,13 +54,28 @@ export class Inventory {
                     { ...ts, fontSize: '16px', color: '#aaddff' })
                     .setOrigin(0.5, 0).setDepth(D).setScrollFactor(0);
 
-    // One text object per slot (icon + label + qty, centered)
-    this._slotTexts = Array.from({ length: COLS * ROWS }, () =>
+    // Separate text objects for icons and labels
+    this._slotIcons = Array.from({ length: COLS * ROWS }, () =>
+      scene.add.text(0, 0, '', { ...ts, fontSize: '28px', color: '#fff', align: 'center' })
+        .setOrigin(0.5, 0.5).setDepth(D + 1).setScrollFactor(0)
+    );
+
+    this._slotLabels = Array.from({ length: COLS * ROWS }, () =>
       scene.add.text(0, 0, '', { ...ts, fontSize: '11px', color: '#fff', align: 'center' })
         .setOrigin(0.5, 0.5).setDepth(D + 1).setScrollFactor(0)
     );
 
-    this._ghostText = scene.add.text(0, 0, '',
+    // Quantidade no canto superior direito dos slots
+    this._slotQtys = Array.from({ length: COLS * ROWS }, () =>
+      scene.add.text(0, 0, '', { ...ts, fontSize: '10px', color: '#ffdd88', align: 'right' })
+        .setOrigin(1, 0).setDepth(D + 2).setScrollFactor(0)
+    );
+
+    this._ghostIcon = scene.add.text(0, 0, '',
+      { ...ts, fontSize: '28px', color: '#fff', align: 'center' })
+      .setOrigin(0.5, 0.4).setDepth(D + 3).setScrollFactor(0);
+
+    this._ghostLabel = scene.add.text(0, 0, '',
       { ...ts, fontSize: '11px', color: '#fff', align: 'center' })
       .setOrigin(0.5, 0.5).setDepth(D + 3).setScrollFactor(0);
 
@@ -151,7 +166,8 @@ export class Inventory {
     this._mouseDown = false;
     this._dragging  = false;
     this._ghostGfx.clear();
-    this._ghostText.setText('');
+    this._ghostIcon.setText('');
+    this._ghostLabel.setText('');
   }
 
   _drawGhost(px, py) {
@@ -166,9 +182,13 @@ export class Inventory {
     this._ghostGfx.strokeRoundedRect(px - S / 2, py - S / 2, S, S, 7);
     const qty     = this._getQty(key);
     const isEquip = def.equip ?? false;
-    const qtyLine = isEquip ? '' : `\n×${qty}`;
-    this._ghostText.setPosition(px, py)
-      .setText(`${def.icon}\n${def.label}${qtyLine}`)
+    const qtyLine = isEquip ? '' : `×${qty}`;
+    
+    this._ghostIcon.setPosition(px, py - 6)
+      .setText(def.icon)
+      .setColor(def.color);
+    this._ghostLabel.setPosition(px, py + 10)
+      .setText(`${def.label}${qtyLine ? '\n' + qtyLine : ''}`)
       .setColor(def.color);
   }
 
@@ -215,18 +235,33 @@ export class Inventory {
       this._g.lineStyle(isEquip && owned ? 2 : 1, borderCol, borderAlpha);
       this._g.strokeRoundedRect(sx, sy, SLOT_SIZE, SLOT_SIZE, 7);
 
-      // Slot content text
-      const t = this._slotTexts[i];
+      // Slot content - icon and label
+      const iconT = this._slotIcons[i];
+      const labelT = this._slotLabels[i];
+      const qtyT = this._slotQtys[i];
       if (showContent) {
-        const label = isEquip
-          ? `${def.icon}\n${def.label}`
-          : `${def.icon}\n${def.label}\n×${qty}`;
-        t.setPosition(sx + SLOT_SIZE / 2, sy + SLOT_SIZE / 2)
-         .setText(label)
+        iconT.setPosition(sx + SLOT_SIZE / 2, sy + SLOT_SIZE / 2 - 8)
+         .setText(def.icon)
          .setColor(def.color)
          .setVisible(true);
+        labelT.setPosition(sx + SLOT_SIZE / 2, sy + SLOT_SIZE / 2 + 12)
+         .setText(def.label)
+         .setColor(def.color)
+         .setVisible(true);
+        
+        // Quantidade no canto superior direito (apenas para não equipáveis)
+        if (!isEquip) {
+          qtyT.setPosition(sx + SLOT_SIZE - 5, sy + 4)
+           .setText(`×${qty}`)
+           .setColor(def.color)
+           .setVisible(true);
+        } else {
+          qtyT.setVisible(false);
+        }
       } else {
-        t.setVisible(false);
+        iconT.setVisible(false);
+        labelT.setVisible(false);
+        qtyT.setVisible(false);
       }
     }
   }
@@ -234,13 +269,17 @@ export class Inventory {
   _setVisible(v) {
     this._g.setVisible(v);
     this._ghostGfx.setVisible(v);
-    this._ghostText.setVisible(v);
+    this._ghostIcon.setVisible(v);
+    this._ghostLabel.setVisible(v);
     this._title.setVisible(v);
     this._closeBtn.setVisible(v);
-    this._slotTexts.forEach(t => t.setVisible(v));
+    this._slotIcons.forEach(t => t.setVisible(v));
+    this._slotLabels.forEach(t => t.setVisible(v));
+    this._slotQtys.forEach(t => t.setVisible(v));
     if (!v) {
       this._ghostGfx.clear();
-      this._ghostText.setText('');
+      this._ghostIcon.setText('');
+      this._ghostLabel.setText('');
     }
   }
 }

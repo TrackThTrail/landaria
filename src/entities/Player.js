@@ -53,15 +53,25 @@ export class Player {
     this.maxFuel = 100;
     this.oxygen    = 100;
     this.maxOxygen = 100;
-    this.copper  = 0;
-    this.iron    = 0;  // Ferro no inventário
-    this.rkanium = 0;  // Rkanium no inventário
-    this.stones  = 0;   // Pedras de Iluminação no inventário
-    this.hasRadar = false;  // Começa sem Radar
+    this.copper  = 10;
+    this.iron    = 10;  // Ferro no inventário
+    this.rkanium = 10;  // Rkanium no inventário
+    this.stones  = 10;   // Pedras de Iluminação no inventário
+    this.hasRadar = true;  // Começa com Radar
     this.medkits  = 1;   // Med-kits no inventário
-    this.lanterns = 0;   // Começa sem Lanterna
+    this.lanterns = 1;   // Começa com Lanterna
     this.lanternOn = false;  // Lanterna ligada
-    this.hasJetpack = false; // Começa sem Jetpack
+    this.hasJetpack = true; // Começa com Jetpack
+
+    // Progressão
+    this.xp             = 99;
+    this.xpToNext       = 100;
+    this.suitResistance = 10;  // pontos de resistência (absorção de dano)
+    this.skillUpgrades  = {
+      suitResistance: 0,
+      oxygenTank: 0,
+      battery: 0,
+    };
 
     // Efeito do med-kit
     this.medkitActive    = false;
@@ -106,6 +116,49 @@ export class Player {
     if (type === 'health_potion') {
       this.effects.push({ type, tickInterval: 1000, tickTimer: 1000, remainingTicks: 10 });
     }
+  }
+
+  gainXp(amount) {
+    if (amount <= 0) return;
+    this.xp += amount;
+    while (this.xp >= this.xpToNext) {
+      this.xp -= this.xpToNext;
+      this.level++;
+      this.xpToNext = Math.floor(this.xpToNext * 1.25);
+    }
+  }
+
+  getAvailableSkillPoints() {
+    const spent = this.skillUpgrades.suitResistance + this.skillUpgrades.oxygenTank + this.skillUpgrades.battery;
+    return Math.max(0, (this.level - 1) - spent);
+  }
+
+  applySkillUpgrade(type) {
+    if (!Object.hasOwn(this.skillUpgrades, type)) return false;
+    if (this.getAvailableSkillPoints() <= 0) return false;
+    if (this.skillUpgrades[type] >= 3) return false;
+
+    this.skillUpgrades[type]++;
+
+    if (type === 'suitResistance') {
+      this.suitResistance += 5;
+      return true;
+    }
+
+    if (type === 'oxygenTank') {
+      this.maxOxygen += 20;
+      this.oxygen = Math.min(this.maxOxygen, this.oxygen + 20);
+      return true;
+    }
+
+    if (type === 'battery') {
+      // Cada nível adiciona meia barra de bateria (50% da capacidade base).
+      this.maxFuel += 50;
+      this.fuel = Math.min(this.maxFuel, this.fuel + 50);
+      return true;
+    }
+
+    return false;
   }
 
   drainFuel(amount) {
@@ -733,29 +786,22 @@ export class Player {
     const barH = 6;
     const barX = x - barW / 2;
 
-    const manaY  = headTop - 22;
-    const hpY    = manaY - barH - 3;
-    const oxyY   = hpY  - barH - 3;
+    // Apenas HP e XP acima do personagem
+    const xpY = headTop - 22;
+    const hpY = xpY - barH - 3;
 
-    // Barra de oxigênio
-    const oxyPct = this.oxygen / this.maxOxygen;
-    const oxyColor = oxyPct > 0.5 ? 0x22aaff : oxyPct > 0.25 ? 0xff8800 : 0xff2222;
-    g.fillStyle(0x0a1020, 0.75);
-    g.fillRoundedRect(barX - 1, oxyY - 1, barW + 2, barH + 2, 2);
-    g.fillStyle(oxyColor, 1);
-    g.fillRoundedRect(barX, oxyY, barW * oxyPct, barH, 2);
-
+    // Barra de HP
     g.fillStyle(0x1a0a0a, 0.75);
     g.fillRoundedRect(barX - 1, hpY - 1, barW + 2, barH + 2, 2);
-    g.fillStyle(0x22cc44, 1);
+    g.fillStyle(0xff3333, 1);
     g.fillRoundedRect(barX, hpY, barW * (this.hp / this.maxHp), barH, 2);
 
+    // Barra de XP
+    const xpPct = Math.min(1, this.xp / this.xpToNext);
     g.fillStyle(0x0a0a1a, 0.75);
-    g.fillRoundedRect(barX - 1, manaY - 1, barW + 2, barH + 2, 2);
-    const fuelPct = this.fuel / this.maxFuel;
-    const fuelColor = fuelPct > 0.5 ? 0xddcc00 : fuelPct > 0.25 ? 0xff8800 : 0xff2200;
-    g.fillStyle(fuelColor, 1);
-    g.fillRoundedRect(barX, manaY, barW * fuelPct, barH, 2);
+    g.fillRoundedRect(barX - 1, xpY - 1, barW + 2, barH + 2, 2);
+    g.fillStyle(0x4455ff, 0.9);
+    g.fillRoundedRect(barX, xpY, barW * xpPct, barH, 2);
 
     // Ícone de paraquedas — visível apenas enquanto disponível
     if (this.hasParachute) {
@@ -774,7 +820,7 @@ export class Player {
     // Ícone de med-kit — visível enquanto efeito activo
     if (this.medkitActive) {
       const ix = barX + barW + 8;
-      const iy = manaY + barH / 2;
+      const iy = xpY + barH / 2;
       g.fillStyle(0x330000, 0.75);
       g.fillRect(ix - 7, iy - 7, 14, 14);
       g.fillStyle(0xff3333, 1);
